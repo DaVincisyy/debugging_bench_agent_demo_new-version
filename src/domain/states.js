@@ -1,0 +1,12 @@
+export const AgentState = Object.freeze({
+  IDLE: "IDLE",
+  PREPARING: "PREPARING",
+  EXECUTING: "EXECUTING",
+  REPORTING: "REPORTING"
+});
+
+export const StepKind = Object.freeze({
+  ARM_MOTION: "ARM_MOTION",
+  EQUIPMENT_MEASUREMENT: "EQUIPMENT_MEASUREMENT",
+  VISUAL_CAPTURE: "VISUAL_CAPTURE"
+});
