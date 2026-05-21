@@ -1,0 +1,19 @@
+{
+  "mode": "simulation",
+  "ip": "192.168.2.6",
+  "dashboardPort": 29999,
+  "motionPort": 30003,
+  "feedbackPort": 30004,
+  "speed": 30,
+  "load": 0.5,
+  "timeoutMs": 5000,
+  "autoEnable": true,
+  "motionCommand": "MovJ",
+  "returnHome": false,
+  "homePose": {
+    "x": 350,
+    "y": 0,
+    "z": 0,
+    "r": 0
+  }
+}

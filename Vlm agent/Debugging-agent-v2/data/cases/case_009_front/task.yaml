@@ -1,0 +1,120 @@
+# ============================================================
+# 测试用例：case_009_tp809_front
+#
+# Step1：与 SKILL / 历史 case 完全一致（两段式原理图→TP、位号图→绿圈）。
+# Step3：本用例 **不用红框对齐**，跳过 Step2；Step3 **禁止**调用 `match_green_tp_roi_to_board`
+#       或 `run_step3_mapping`，由模型根据**位号图 ROI 邻域器件形状与排布**在实物全板上视觉定位 prior。
+#
+# inputs 相对路径 = 相对本 task.yaml 所在目录。
+# ============================================================
+
+question: |
+  你需要完成 Step1-9（过程日志至 `step_08.md`）全流程。Step1 **必须**完全按下面两段式执行（与此前 case_009 方法一致），不可缩水。
+  **变更**：不要求红框对齐；Step1 完成后 **跳过 Step2 画红框**。Step3 **不要**用 OpenCV 模板匹配：禁止调用 `match_green_tp_roi_to_board`、禁止调用 `run_step3_mapping`；用**模型自己的视觉能力**完成 prior（见 Step3）。
+
+  ## 全流程几何约束（强制）
+  - **禁止**对本任务中出现的位号图、板照、Step1 绿圈图及任意中间 PNG **做旋转、镜像、透视矫正**（含 `run_python` 里 `cv2.rotate` / `PIL.Image.rotate` / `transpose` / `warpAffine` / `warpPerspective` 等）。**只允许**在**原始像素坐标系**下 `view_image`、`crop_image`（矩形裁剪）、`annotate_image`。
+  - 若板子在照片里看起来是斜的，在脑子里做对应关系，**不要**把图转「摆正」再测点。
+
+  ## Step1（两段式，输入必须与 inputs 字段一致）
+
+  **段 A — 用户意图 → TP 编号（尚未碰位号图 PDF）**
+  - 必读输入：`user_measurement_question`、`schematic_image`（原理图 PNG）。
+  - 将二者一并交给模型：根据用户「要测什么 / 该用哪个测试点」在原理图上推理，**先得出唯一的测试点编号 `TPxxx`**。
+  - 本阶段**不要**假设题目里已经给出 TP 编号；`TPxxx` 必须由模型从原理图 + 用户问题推出，并在 `debug/step01_signal_to_tp.json` 中写明依据。
+  - 禁止对 `schematic_image` 使用 `search_pdf_text`（无 PDF 文本层）；使用 `view_image` 做多模态阅读。
+
+  **段 B — TPxxx + 位号图 PDF → 绿圈图**
+  - 使用推断出的 **`TPxxx`** 与 `locator_pdf`：调用 `search_pdf_text` 搜索该字符串，取 **`page` + `rect_pdf`**。
+  - **必须**调用 **`pdf_draw_circle_then_rasterize`**，且 **`out_path` 只能为** `debug/step01_locator_front_anchor.png`（`pdf_path`、`page`、`rect_pdf`、`dpi` 与搜索一致，建议 **600**）。
+  - 若位号图导出后彩色丝印/细线偏淡，**请同时传入**（与 `dpi` 一起在本次调用中指定）：**`graphics_min_line_width`: 0.5**、**`aa_level`: 3**（可按观感微调，但不要省略这两项）。
+  - **禁止**将主产出写到 `step01_locator_page1_circled.png` 等其它文件名。
+  - 用 **`view_image`** 核对绿圈是否落在 `TPxxx` 丝印处。
+
+  **Step1 产出**
+  - `debug/step01_locator_front_anchor.png`：**仅绿圈**，无红框。
+  - `debug/step01_signal_to_tp.json`：**合法 JSON**（不要用 Markdown 冒充），至少含：`user_measurement_question`、`tp_id_or_ref`（即推出的 TPxxx）、`locator_page`、`evidence`（原理图判读 + 位号图检索与 rect_pdf / dpi 等）。
+
+  ## Step2（本用例跳过红框）
+  - **禁止**：生成 `debug/step02_locator_front_anchor.png` / `debug/step02_board_front_anchor.png`；禁止为对齐在 `run_python` 里手写含 `F:\...` 的非 raw 字符串（`\t` 会破坏路径）。
+  - 写简短 `progress/step_02.md`：声明本用例跳过红框锚定，Step3 使用 VLM 邻域排布匹配。
+
+  ## Step3（prior：VLM 邻域排布，不用代码匹配）
+  - **禁止**：`match_green_tp_roi_to_board`、`run_step*` 类 Step3 脚本、依赖 step02 PNG。
+  - **固定顺序（严禁跳步）**
+    1. **3A — 裁位号图邻域 ROI**
+    2. **3B — 只做 ROI 内分析**（`progress/step_03.md` 中 **`### Step3B`**）
+    3. **Step4 — 位号图局部红框**（见下「Step4–9」**第一条**；未完成 3B 不能生成 **`debug/step04_locator_landmarks.png`**；未完成 Step4 不能写 **`vlm_neighborhood_layout_match` 的 `step03_mapping.json`**、不能 **`annotate_image` → `step03_prior_on_board`**）
+    4. **3C — 实物板 prior**（仅在 Step4 落盘之后；见下 **Step5**）
+
+  - **3A 位号图 ROI（以 Step1 绿圈为唯一锚点）**
+    - **首选工具**：**`crop_green_tp_neighborhood_on_locator`**（在 `debug/step01_locator_front_anchor.png` 上用 HSV 找**绿圈质心**，与 Step1 画圆结果一致；**PDF 像素坐标不会自动进对话**，手填 `crop_image` 易偏）。默认 **`debug/step03_locator_roi.png`** 约 **500×500**，可用 **`margin_px`** / **`min_side_px`** 加大。**仅当工具失败**再用手动 `crop_image`。
+    - **手动 `crop_image`（备选）**：**`path` 只能**为 **`debug/step01_locator_front_anchor.png`**。**严禁**用实物板生成 **`debug/step03_locator_roi.png`**。先 `view_image`，以绿圈中心对称扩框；**宽、高均 ≥ 500 px**。
+    - **禁止**裁得过小或框错：须能看见绿圈周围**多颗器件**（至少 **2～3 组**块）。不满意则回到 3A（提高 `margin_px` 或重裁）。
+    - **`view_image`** 自检 `debug/step03_locator_roi.png`。实物板局部核对另存 **`debug/step03_board_roi.png`**。
+
+  - **3B ROI 内分析（必须先写清，再进入 Step4 / 板图匹配）**
+    - 针对 **`debug/step03_locator_roi.png` 这一张图**，在 `progress/step_03.md` 写独立小节（例如 `### Step3B 位号图 ROI 内分析`），**逐项**说明：
+      - 画面中有哪些**器件/图形块**（用「竖条封装、并排矩形、围框 IC」等**形状语言**，可辅以丝印）；
+      - 各块**相对绿圈（目标 TP）**的方位（上/下/左/右、成排关系、大致疏密）；
+      - 小结成一段 **「可带到实物图上的排布签名」**。
+    - **在未完成上述小节之前**：禁止以「去板子上找 TP」为主要目的去 `view_image`/`crop_image` **实物板** `front_board_photo`；允许仅 `image_info` 等不触达匹配推理的准备操作若任务需要。
+    - **工具会校验**：未完成 3B 前不得裁 **`step03_board_roi`**、不得写（含 `vlm_neighborhood_layout_match` 的）**`step03_mapping.json`**、不得 **`run_candidate_pipeline`** 等（见 `[step3b-gate]` / `[step4-gate]`）。
+
+  - **不要**再要求 `step03_tp_roi_template.png` / `step03_tp_roi_match_debug.png`（本用例不走模板匹配）。
+
+  ## Step4–9（每步必须 **实际调用工具** —— 禁止只写 `progress/*.md` 或纯文字计划）
+
+  - **总规则**：下列每一步都要在本轮或随后若干轮里出现对应的 **tool 调用**。**禁止**只用自然语言描述却不调用工具。
+
+  - **Step4 — 位号图局部：红框标丝印器件框（必调）**
+    - **依据**：结合 **Step3B** 与 **`debug/step03_locator_roi.png`**。位号图上绿圈周围常有 **灰黑色线框**的器件外形，框内 **红字丝印**（位号/型号）。Step4 要做的是：挑出 **边缘清晰、易带到实物板对照** 的若干此类框，用 **红色矩形** 套在「灰黑外框」外沿（略贴边即可），**不要**只点中心、**不要**用全图坐标。
+    - **唯一工作图**：**`debug/step03_locator_roi.png`**（原点 = **该图左上角**，`image_info` 可查宽高；**禁止**用 `step01_locator_front_anchor.png` 的坐标直接粘贴）。
+    - **`view_image`** → **`annotate_image`**：`path` = **`debug/step03_locator_roi.png`**，`points` = 多个 **`{bbox:[left,top,right,bottom], color:"red", width:4, label:"可选"}`**（`bbox` 必须满足 right>left、bottom>top，且在图内）。
+    - **`out_path`** = **`debug/step04_locator_landmarks.png`** → **`view_image`** 自检 → **`save_text_file`** `progress/step_04.md`（说明套了哪些丝印框、相对绿圈方位；文件名必须出现 **`debug/step04_locator_landmarks.png`**）。
+
+  - **Step5 — 实物板 prior（原 Step3C；必调；须在 Step4 之后）**
+    - **`view_image`**：全板 `front_board_photo`（禁止旋转）。结合 **Step3B** 与 **Step4 红框** 定匹配区与 TP。核对可 **`crop_image`**（板图）→ **`debug/step03_board_roi.png`**。
+    - **`debug/step03_mapping.json`**：`mapping_method` = **`vlm_neighborhood_layout_match`**；`locator_box`, `board_box`, `tp_locator_center`, `u`, `v`, `tp_prior_board`（与 SKILL 公式自洽且与视觉一致）。可选 `neighborhood_notes`。
+    - **`annotate_image`** → **`debug/step03_prior_on_board.png`**（全板坐标，与 JSON 一致）。
+    - **`progress/step_03.md`** 追加 **`### Step3C`**（板图匹配依据）。
+
+  - **Step6 — 板图 ROI 裁剪（必调）**
+    1. **`read_text_file`**：`debug/step03_mapping.json` → **`tp_prior_board`**。
+    2. **`image_info`**：全板图。
+    3. **`crop_image`**：板图；`bbox` 以 prior 为中心半宽/半高 **50**（约 100×100，`clamp`）；`out_path` = **`debug/step04_roi_crop.png`**。
+    4. **`view_image`**：`debug/step04_roi_crop.png`。
+    5. **`save_text_file`**：`progress/step_05.md`（bbox、**候选/评分** 等，满足 finish 关键词）。
+
+  - **Step7–8 — 候选与打分（必调）**
+    - **`run_candidate_pipeline`**：**至少调用一次**（与 Step6 参数一致）。产出 **`debug/step57_candidates_scored.png`** 等。
+    - **`save_text_file`**：`progress/step_06.md` … `progress/step_07.md`（**不能替代** pipeline）。
+
+  - **Step9 — 最终标注（必调）**
+    - **`read_text_file`**：赢家信息（如 **`debug/step08_result.json`** 等）。
+    - **`annotate_image`**：全板 `front_board_photo` → **`debug/step08_final_tp.png`**（`radius` = 赢家 **`r_vis`**）。
+    - **`save_text_file`**：`progress/step_08.md`。
+    - **`finish`**：必须调用。
+
+  - **强制产物**：`debug/step04_locator_landmarks.png`、`debug/step04_roi_crop.png`、`debug/step57_candidates_scored.png`、`debug/step08_final_tp.png`。
+
+  ## 过程约束
+  - `progress/step_01.md` … `progress/step_08.md`；Step3 写明坐标系：origin=top-left, +x=right, +y=down, pixel；并**声明未对任何图像做旋转/透视矫正**。
+  - 最终 `finish`：`tp_id` / `camera_view` / `pixel` / `confidence` / `needs_user_help` / `user_message` / `reasoning`。
+
+inputs:
+  skills_doc: ../../skills/SKILL.md
+  user_measurement_question: |
+    我要确认输入电压（VCP）是否正常，应该用哪个测试点？
+  schematic_image: voyah_hvac_v01_20240729_01.png
+  locator_pdf: 位号图7.29.pdf
+  front_board_photo: PCBA_IMG.jpg
+  front_locator_marked: debug/step01_locator_front_anchor.png
+  front_board_marked: PCBA_IMG.jpg
+  board_id: "HM-TMSC-03-case09"
+  engineer_note: |
+    Step1 与历史 case_009 相同；Step2 跳过；Step3 为 vlm_neighborhood_layout_match（不用 match_green_tp_roi_to_board）。
+    Step3A 默认 ~500×500 `step03_locator_roi`；Step4 仅在位号图 ROI 上红框标 landmark → `step04_locator_landmarks.png`；Step5 再全板 prior 与 mapping JSON。
+    Step6–9：板 ROI crop、pipeline、全板最终标注、finish；勿只写 progress。
+    pdf_draw_circle_then_rasterize 建议 graphics_min_line_width=0.5、aa_level=3；**不传 radius_pt** 时绿圈比旧版约小一倍（更贴 TP），需大圈时再传 radius_pt。
+    run_python 若读板图请用 INPUT_PATHS 或 raw 字符串，避免 \t 路径错误。

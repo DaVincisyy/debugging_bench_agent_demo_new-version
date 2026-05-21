@@ -1,62 +1,112 @@
-# Debugging Bench Agent
+# Debugging Bench Agent Demo
 
-最小可运行版本，用于先验证接口和流程：
+This repository contains a PCBA debugging bench prototype that connects user input, a VLM-based visual reasoning agent, MG400 robot control/simulation, and a small HTTP UI/API for running debugging tasks.
 
-```text
-Prompt + VLM Image + Model Attachments
-  -> LLM Input Core
-  -> VLM Bench Awareness
-  -> Agent Plan
-  -> Arm/Equipment Mock Execution
-  -> GUI/Report Result
-```
+## What Is Included
 
-当前版本的 VLM、机械臂、测试设备都使用 mock adapter。RAG 暂时停用，原理图、原理图位图、位号图、位号图位图等文件会通过 `modelAttachments` 作为大模型输入附件传入。
+- `Inputdemo/` - Node.js HTTP service, browser UI, pipeline orchestration, MG400 adapters, VLM task generation, and tests.
+- `Vlm agent/Debugging-agent-v2/` - Python VLM agent for locating PCBA test points from board photos, locator diagrams, schematics, and task YAML files.
+- `MG400stimulation/` - MG400 simulation experiments and MuJoCo-related workspace analysis tools.
+- `mg400demo/` - MG400 TCP/IP control examples and reference scripts.
+- `config/` - Shared local configuration such as MG400 connection settings.
+- `scripts/` - Utility scripts for service or network testing.
 
-## 项目结构
+## Architecture
 
 ```text
-src/
-  adapters/       外部能力接口实现，当前为 mock
-  agent/          Agent 编排与状态流转
-  api/            HTTP API 服务与内置前端页面
-  cli/            本地端到端演示入口
-  domain/         数据结构、状态、错误类型
-  utils/          通用工具
-docs/
-  api.md          API 契约说明
-test/
-  pipeline.test.js
+User instruction / uploaded case data
+  -> Inputdemo HTTP API and web UI
+  -> input parser and task planner
+  -> VLM task YAML generation
+  -> Debugging-agent-v2 visual reasoning
+  -> pixel target / confidence result
+  -> MG400 real or simulation execution adapter
+  -> run status, report, and UI feedback
 ```
 
-## 运行
+## Requirements
+
+- Node.js 20 or newer
+- npm
+- Python 3.10 or newer for the VLM agent and MG400 Python scripts
+- Optional: MG400 robot or simulation environment for hardware execution
+
+## Install
+
+Install the Node workspace dependencies from the repository root:
 
 ```bash
-npm run demo
+npm install
 ```
 
-启动 HTTP 服务和前端页面：
+Install the Python VLM agent dependencies when using `Debugging-agent-v2` directly:
+
+```bash
+cd "Vlm agent/Debugging-agent-v2"
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## Configure VLM Access
+
+Create a local `.env` file in `Vlm agent/Debugging-agent-v2/` and provide the model endpoint:
+
+```env
+VLM_BASE_URL=https://api.example.com/v1
+VLM_API_KEY=your_api_key
+VLM_MODEL=your_vision_model
+```
+
+Useful runtime overrides:
+
+- `VLM_AGENT_DIR` - path to `Debugging-agent-v2`.
+- `VLM_ENV_FILE` - path to the `.env` file used by the VLM agent.
+- `VLM_AGENT_MAX_STEPS` - maximum agent tool-use steps.
+- `VLM_AGENT_TIMEOUT_MS` - timeout used by the Node service while waiting for the VLM agent.
+- `VLM_AGENT_RUNNER=cli` - force the Node service to use the CLI fallback runner.
+
+## Run The Web/API Service
+
+From the repository root:
 
 ```bash
 npm start
 ```
 
-默认监听 `http://localhost:3000`。打开根路径 `/` 可以使用前端页面提交：
+The service starts on `http://localhost:3000` by default.
 
-1. 文字或语音 prompt
-2. 给 VLM 的实物图 / bench 图像
-3. 给大模型的原理图、位号图、位图、PDF 等附件
+Available entry points:
 
-## 示例请求
+- `GET /` - browser UI for submitting debugging tasks.
+- `GET /health` - health check.
+- `POST /api/runs` - create a debugging run.
+- `GET /api/mg400/config` - read MG400 config.
+- `POST /api/mg400/config` - update MG400 config.
+- `POST /api/mg400/test` - test MG400 connectivity.
 
-```bash
-curl -X POST http://localhost:3000/api/runs ^
-  -H "Content-Type: application/json" ^
-  -d "{\"prompt\":{\"mode\":\"text\",\"text\":\"我要确认输入电压 VCP 是否正常\"},\"visualCapture\":{\"imageRef\":\"PCBA_IMG.jpg\"},\"modelAttachments\":[{\"kind\":\"schematic\",\"name\":\"voyah_hvac_v01_20240729_01.png\",\"type\":\"image/png\"},{\"kind\":\"layout\",\"name\":\"位号图7.29_01(12).png\",\"type\":\"image/png\"}]}"
-```
-
-## 测试
+## Run Tests
 
 ```bash
 npm test
 ```
+
+The Node tests use mock adapters where possible so the pipeline can be checked without calling a real VLM provider or robot.
+
+For the Python VLM agent:
+
+```bash
+cd "Vlm agent/Debugging-agent-v2"
+python tests\test_unit.py
+python tests\test_agent_e2e.py
+```
+
+## MG400 Notes
+
+MG400 connection settings live in `config/mg400.json` and `Inputdemo/config/mg400.json`. Keep real network settings aligned with the robot controller before using hardware commands.
+
+The `MG400stimulation/` and `mg400demo/` folders contain simulation, workspace analysis, and TCP/IP examples. Treat hardware-facing scripts carefully and verify robot position, speed, and workspace limits before running motion commands.
+
+## Repository Hygiene
+
+Generated runs, logs, caches, local environments, `node_modules`, packaged VSIX files, and VLM debug workspaces are ignored by `.gitignore`. Keep secrets in local `.env` files only.

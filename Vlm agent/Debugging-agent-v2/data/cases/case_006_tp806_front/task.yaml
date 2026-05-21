@@ -1,0 +1,56 @@
+# ============================================================
+# 测试用例：case_001_tp12_front
+#
+# 请把同目录下的 front_locator_marked.png / front_board_marked.png /
+# schematic.pdf 替换成你的真实素材。文件名可以改，但要同步改 inputs 字段。
+#
+# inputs 下的相对路径 = 相对 *本 task.yaml 所在目录* 解析。
+# ============================================================
+
+question: |
+  你需要在 front_board_marked 中用红色圆圈精确框出目标测试点的位置。
+  重要：最大的芯片红框我已经精确标好，你不需要再做 Step 1/2。
+  请直接从 skills 的 Step 3 开始执行（Build local mapping）。
+
+  输入说明：
+  1) front_locator_marked: 正面位号图，红框框出最大的芯片，绿色圆圈圈出目标点；
+  2) front_board_marked: 正面实物图，红框框出最大的芯片；
+  3) schematic_pdf: 原理图 PDF。
+
+  强制约束（必须遵守）：
+  - 每完成一个 skills 步骤，都必须调用一次 save_text_file 写中间结果，
+    路径为 progress/step_XX.md（例如 progress/step_03.md）。
+  - 中间结果最少包含：当前步骤编号、使用到的输入、关键判断、产出坐标/候选区域、
+    下一步计划。
+  - 如果该步骤产出图片（裁图/标注图），请把图片路径也写入对应 step_XX.md。
+  - 未完成中间结果落盘前，不要进入下一步骤。
+
+  调试可视化产物（强制输出）：
+  - Step 3 (local mapping): 必须输出先验位置叠加图
+    `debug/step03_prior_on_board.png`
+    （在完整 front_board_marked 上标出你认为的 TP 先验位置）。
+  - Step 3 还必须输出由 run_python 计算得到的映射文件
+    `debug/step03_mapping.json`，至少包含：
+    `locator_box`, `board_box`, `tp_locator_center`, `u`, `v`, `tp_prior_board`.
+  - Step 3 的 step_03.md 必须明确坐标约定：
+    原点=图像左上角，+x 向右，+y 向下，单位=像素，并写出 `(x,y)` 属于哪张图。
+  - Step 4 (ROI): 必须输出 ROI 裁图
+    `debug/step04_roi_crop.png`
+    （这个才是局部候选搜索区，不等同于 Step 3 的先验叠加图）。
+  - Step 5/6/7: 必须输出候选点调试图（含候选编号）
+    `debug/step57_candidates_scored.png`
+    并在 step_05/06/07.md 中写 candidate+score 表。
+  - Step 8: 必须输出最终结果图
+    `debug/step08_final_tp.png`（红色圆圈+TP标签）。
+
+  最终请调用 finish 返回结构化结果：
+  tp_id / camera_view / pixel / confidence / needs_user_help / user_message / reasoning。
+
+inputs:
+  skills_doc: ../../skills/SKILL.md
+  front_locator_marked: 位号图7.29_01(7).png
+  front_board_marked: largest_chip_marked_pins_included_v11.png
+  schematic_pdf: voyah_hvac_v01_20240729.pdf
+  board_id: "HM-TMSC-03"
+  engineer_note: |
+    本轮仅处理正面图定位。若证据不足，请给出候选点+置信度并说明还缺什么信息。

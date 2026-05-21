@@ -1,2 +1,44 @@
-server.log
-server.err.log
+# Dependencies
+node_modules/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+*.err.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime outputs
+output/
+Inputdemo/output/
+MG400stimulation/MG400simulation-git-latest-ghproxy/
+**/workspace/runs/
+**/workspace/debug/
+**/workspace/workspace/
+**/__pycache__/
+**/.pytest_cache/
+**/.pytest_tmp/
+*.py[cod]
+
+# Local editor and OS files
+.vscode/
+.idea/
+.git.local-backup/
+.DS_Store
+Thumbs.db
+
+# Packaged extensions and temporary archives
+*.vsix
+*.zip
+*.tar
+*.tar.gz
+
+# Python virtual environments
+.venv/
+venv/
+env/

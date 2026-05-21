@@ -1,15 +1,12 @@
 {
-  "name": "debugging-bench-agent",
-  "version": "0.1.0",
-  "description": "Mocked Debugging Bench Agent pipeline with VLM interface, RAG lookup, execution adapters, and report generation.",
-  "type": "module",
+  "name": "new-project-2",
   "private": true,
   "scripts": {
-    "start": "node src/api/server.js",
-    "demo": "node src/cli/runDemo.js",
-    "test": "node --test"
+    "start": "npm --prefix Inputdemo start",
+    "demo": "npm --prefix Inputdemo run demo",
+    "test": "npm --prefix Inputdemo test"
   },
-  "engines": {
-    "node": ">=20"
-  }
+  "workspaces": [
+    "Inputdemo"
+  ]
 }
