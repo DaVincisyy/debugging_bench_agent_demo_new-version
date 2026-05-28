@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { defaultVlmAgentRunsDir } from "./defaultPaths.js";
 
 const DEFAULT_SERVICE_URL = "http://127.0.0.1:8000";
 
@@ -7,8 +8,8 @@ export class VlmAgentServiceRunner {
   constructor({
     baseUrl = process.env.VLM_AGENT_SERVICE_URL || DEFAULT_SERVICE_URL,
     envFile = process.env.VLM_ENV_FILE,
-    runsRoot = path.join(process.cwd(), "output", "vlm-agent-runs"),
-    maxSteps = Number(process.env.VLM_AGENT_MAX_STEPS || 160),
+    runsRoot = defaultVlmAgentRunsDir(),
+    maxSteps = Number(process.env.VLM_AGENT_MAX_STEPS || 80),
     timeoutMs = Number(process.env.VLM_AGENT_TIMEOUT_MS || 60 * 60 * 1000),
     pollIntervalMs = Number(process.env.VLM_AGENT_SERVICE_POLL_INTERVAL_MS || 1000),
     fallbackRunner = null
@@ -134,11 +135,28 @@ export class VlmAgentServiceRunner {
     }, "post VLM agent service observation", this.baseUrl);
   }
 
-  async waitForRun(runId) {
+  async waitForRun(runId, { onEvent } = {}) {
     const deadline = Date.now() + this.timeoutMs;
+    let eventSeq = 0;
     while (Date.now() < deadline) {
+      if (onEvent) {
+        const eventPayload = await this.getEvents(runId, eventSeq);
+        for (const event of eventPayload.events || []) {
+          eventSeq = Math.max(eventSeq, Number(event.seq) || eventSeq);
+          onEvent(event);
+        }
+      }
       const run = await this.getRun(runId);
-      if (["succeeded", "failed", "cancelled"].includes(run.status)) return run;
+      if (["succeeded", "failed", "cancelled"].includes(run.status)) {
+        if (onEvent) {
+          const eventPayload = await this.getEvents(runId, eventSeq);
+          for (const event of eventPayload.events || []) {
+            eventSeq = Math.max(eventSeq, Number(event.seq) || eventSeq);
+            onEvent(event);
+          }
+        }
+        return run;
+      }
       await sleep(this.pollIntervalMs);
     }
     const latest = await this.getRun(runId);

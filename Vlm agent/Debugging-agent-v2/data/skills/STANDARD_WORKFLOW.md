@@ -4,35 +4,37 @@
 
 **目标**：在工程师自然语言意图 + 原理图 + 可搜索位号图 PDF + 实物板图等输入下，经 VLM 与 OpenCV 协作，得到 **目标测试点在实物板图像素坐标系中的位置**（全流程以 `finish` 及 Step8 产物收敛）。
 
-本文件定义 **本仓库默认、无预画框** 的完整 agent 规程：**Part 0（原理图→TP→PDF→OpenCV 绿圈）→ Part B（位号最大 IC）→ Part A（实物最大 IC）→ Part C（step02 + board_tp_marked）→ Part D（Step3–8，`mapping_method` = `case10_dual_roi_layout`）**。  
-调试产物文件名仍沿用历史前缀 **`case10_*`** / **`step*`**，与 `agent` 与脚本实现一致；**语义上这是唯一主路径**，不区分「第几个 case」。
+本文件定义 **本仓库默认、无预画框** 的完整 agent 规程：**Part 0（原理图→TP→PDF→OpenCV 绿圈）→ Part B（位号最大 IC）→ Part A（实物最大 IC）→ Part C（step02 + board_tp_marked）→ Part D（默认：`mapping_method` = `case12_step02_opencv_ic_align`，case12 Step2 抽象图 + **双 IC 红框 OpenCV 对齐** → Step8 → `finish`）**。  
+**备用 Part D**（显式声明时）：**双 ROI / `case10_dual_roi_layout`**（Step3–8 原主路径）。  
+调试产物文件名仍沿用历史前缀 **`case10_*`** / **`step*`**，与 `agent` 与脚本实现一致。
 
 **与文档的关系**：步骤级细节 **以本文为准**；**Step3–8** 字段名、工具形态等通用契约见 **`SKILL.md`**。若 **`SKILL.md`** 后文的旧版 **Step1（`pdf_draw_circle_then_rasterize`）全链** 与本文冲突，**以本文为准**（旧链仅作历史参考，见 `SKILL.md` 标注）。
 
 ---
 
-**任务类型（重要）**：以下为 **各用例统一采用的默认流程**（**Part 0–C** 同上)。**Part D** **必须**满足 **Step3–8 契约**（`step03_mapping`、`step04_*`、`step05`、`step57`、`step08`、`finish`），**打法**为：**路径 A** — 双 ROI 裁切 → **StepD4.0** OpenCV **`case10_dual_roi_locator_refs` + `step04_locator_roi_refs`**（多锚点/距离/角）→ **`view_image`** → VLM 写 **`case10_tp_dual_roi_direct_vlm.json`**（**`board_roi_target_px_approx` + `board_roi_reference_approx`**）→ **`step04_dual_roi_approx_only.png`**（**板 ROI 上 tp + ref 叠图**，**无** OpenCV 焊盘候选圈）→ **`view_image` 自检** → **至多一次**修正 approx → OpenCV **`snap`**（**仍只对目标 tp**）→ **`case10_tp_dual_roi_direct_refined.json`**；**主路径不要求**阅读 **`step04_dual_roi_direct_candidates.png`**；**若 snap 失败或仍歧义** → 可选 **编号候选图 + VLM 选号** fallback，或 **路径 B**。**若未采纳或失败** → **路径 B** — 位号 ROI **全貌 + pattern** + board **高召回候选**（**非**默认 **`run_candidate_pipeline`**，除非 D7 失败并已 **`step_06.md`** fallback）。
+**任务类型（重要）**：**默认（`STANDARD_WORKFLOW`）**：**Part 0–C** 不变；**Part D** = **`case12_step02_opencv_ic_align`**（**case12 Step2 图 + OpenCV 双红框对齐** → **`case12_board_approx_overlay_opencv.png`** → **`step08_*` → `finish`**），见下文 **「Part D — 默认：`case12_step02_opencv_ic_align`」**。**备用**：若任务显式要求 **`mapping_method: case10_dual_roi_layout`**，则 **Part D-alt** 仍走 **Step3–8 双 ROI / 路径 A / B**（`step03_mapping` 含全量键、`step04_*`、`step05`、`step57` 等），见 **「Part D-alt」**。
 
-**Part 0 须先做 VLM 选点**：**`INPUT_PATHS["user_measurement_question"]`** 加上原理图材料（**下述 `schematic_image` / `schematic_pdf` 至少一种**）→ **`view_image` / `read_text_file` / （可选）`search_pdf_text`（仅当存在可检索 `schematic_pdf`）** → **`save_text_file` → `debug/case10_signal_to_tp.json`**（**`tp_id_or_ref`** 为 **唯一**后续位号图 PDF 搜索词）。**再**使用 **`assembly_drawing_pdf`** + **`search_pdf_text`（query=`tp_id_or_ref`）** + **`pdf_page_to_image`（或等价 `fitz` 栅格）** + **`run_python`**：**工作位号底图 `case10_assembly_drawing.png` 必须来自 PDF 命中该 TP 所在页的整页渲染**，**不得**再以输入 **`位号图*_01(12).png`** 直接复制为 **`case10_assembly_drawing.png`** 作为主路径。**禁止**用 `pdf_draw_circle_then_rasterize` 作 **唯一**最终 TP 标记；**权威绿圈**在 **`case10_assembly_drawing_tp_marked.png`**。
+**Part 0 须先做 VLM 选点**：**`INPUT_PATHS["user_measurement_question"]`** 加上原理图材料（**下述 `schematic_image` / `schematic_pdf` 至少一种**）→ **`view_image` / `read_text_file` / （可选）`search_pdf_text`（仅当存在可检索 `schematic_pdf`）** → **`save_text_file` → `debug/case10_signal_to_tp.json`**（**`tp_id_or_ref`** 为 **唯一**后续位号图 PDF 搜索词）。**再**使用 **`assembly_drawing_pdf`** + **`search_pdf_text`（query=`tp_id_or_ref`）** → **工作底图**：**默认** **`pdf_page_to_image`（或等价 `fitz` 栅格）** → **`debug/case10_assembly_drawing.png`**；**唯一例外**：若 Step0B 选定 **`page_pdf == 1`**（1-based）**且** **`INPUT_PATHS["assembly_drawing_page1_png"]`** 存在（由任务提供、通常为更清晰的第一页整页导出 PNG，如 **`位号图7.29_01(12).png`**），**则** **不必**再对该页调用 **`pdf_page_to_image`**——**复制**该文件为 **`debug/case10_assembly_drawing.png`**（**`shutil.copy2` 或 `cv2` 读写均可**），并在 **`stdout` / `progress`** 写明 **`assembly_source=assembly_drawing_page1_png`**。**若** **`page_pdf != 1`**，**忽略**该键，**必须**仍对 **`page_pdf`** 做 **`pdf_page_to_image`**。**若** 无该输入或**未确认**第一页命中，**不得**用任意预导出 PNG 替代 PDF 栅格。**禁止**用 `pdf_draw_circle_then_rasterize` 作 **唯一**最终 TP 标记；**权威绿圈**在 **`case10_assembly_drawing_tp_marked.png`**。**case12** 等 **仅 Step2 / `embed_workflow` 中场切入**、**不跑 Part 0** 的任务 **无需**提供本键。
 
-**整场执行顺序（强制）**：**Part 0 → Part B → Part A → Part C → Part D（Step3–8）**。不得先做实物 Part A 再做位号 Part B；**Part D 仅在 Part C 完成后开始**。
+**整场执行顺序（强制）**：**Part 0 → Part B → Part A → Part C → Part D**。不得先做实物 Part A 再做位号 Part B；**Part D 仅在 Part C 完成后开始**（默认走 case graph + OpenCV IC 对齐；**勿**在未产出 **`step02_*_anchor.png`** 时开始 Part D）。
 
-**Part 0 — 原理图→`TPxxx` 后接 PDF**：**`case10_signal_to_tp.json`** → **`search_pdf_text`** → 选中 **`hits[].page`**；**`pdf_page_to_image`**（**dpi=864**）→ **`case10_assembly_drawing.png`**；映射 **`rect_pdf`** → **`tp_work_roi`** → OpenCV 绿圈。
+**Part 0 — 原理图→`TPxxx` 后接 PDF**：**`case10_signal_to_tp.json`** → **`search_pdf_text`** → 选中 **`hits[].page`**；**`page_pdf==1` 且存在 `assembly_drawing_page1_png`** → **复制** → **`case10_assembly_drawing.png`**，**否则** **`pdf_page_to_image`**（**dpi=864**）→ **`case10_assembly_drawing.png`**；映射 **`rect_pdf`** → **`tp_work_roi`** → OpenCV 绿圈。
 
 ## 输入
 - **`user_measurement_question`** — **必需**（字符串）：工程师测量 / 调试意图。
 - **`schematic_image`** — **与 `schematic_pdf` 二选一或同时提供**。
   - **`schematic_image`**：原理图栅格（PNG 等），**`view_image`**；**禁止**对栅格 **`search_pdf_text`**。
   - **`schematic_pdf`**（可选）：可检索原理图 PDF；可作 **`search_pdf_text`** / **`pdf_page_to_image`** 与 PNG **互证**，**不**免除在 Part 0 落盘 **`tp_id_or_ref`** 的 VLM 推理。
-- **`assembly_drawing_pdf`**（`INPUT_PATHS["assembly_drawing_pdf"]`）— **必需**：可搜索文本的**位号/装配图** PDF；**`search_pdf_text`** 用 **`case10_signal_to_tp.json`** 的 **`tp_id_or_ref`** 定位 **`page`**，再 **`pdf_page_to_image`** → **`case10_assembly_drawing.png`**。
+- **`assembly_drawing_pdf`**（`INPUT_PATHS["assembly_drawing_pdf"]`）— **必需**：可搜索文本的**位号/装配图** PDF；**`search_pdf_text`** 用 **`case10_signal_to_tp.json`** 的 **`tp_id_or_ref`** 定位 **`page`**，再 **`pdf_page_to_image`** → **`case10_assembly_drawing.png`**（**或**见下项在第一页时的 shortcut）。
+- **`assembly_drawing_page1_png`**（`INPUT_PATHS["assembly_drawing_page1_png"]`）— **可选**：**PDF 第一页**的**整页**、**高清晰**位号栅格（任务目录下文件名可自拟，如 **`位号图7.29_01(12).png`**）。**仅当** Step0B 选定 **`page_pdf == 1`** 时允许用作 **`debug/case10_assembly_drawing.png`** 的**唯一**来源并**跳过**该页的 **`pdf_page_to_image`**；**`page_pdf > 1` 时必须忽略**。**须**与 **`assembly_drawing_pdf` 第 1 页**几何对齐（整页可视区域）；若 Step0C 绿圈与 **`rect_pdf` 映射**明显错位，应改回 **`pdf_page_to_image(dpi=864)`** 重跑底图。**全量 Part 0** 用例均可按需加入；**case12 仅中场链**可不配。
 - **`front_board_photo`**（`INPUT_PATHS["front_board_photo"]`）— **必需**：实物板图。
-- **`assembly_drawing`**（`INPUT_PATHS["assembly_drawing"]`）— **可选 / legacy**：整页位号 PNG，**仅**对照或 PDF 栅格失败 fallback；**主路径禁止**用其覆盖 **`case10_assembly_drawing.png`**。
+- **`assembly_drawing`**（`INPUT_PATHS["assembly_drawing"]`）— **可选 / legacy**：整页位号 PNG，**仅**对照或 PDF 栅格失败 fallback；**主路径禁止**用其覆盖 **`case10_assembly_drawing.png`**（**本键有别于** **`assembly_drawing_page1_png`**：后者仅在 **`page_pdf==1`** 时经规程显式允许替代栅格）。
 - 规程与 Step3–8 说明由运行环境注入 **`workflow_doc`**、`skills_doc`（见文首）；**实物图 Part A** 须 **横幅**工作流；**位号图禁止旋转**。
 
 ## 当前启用｜VLM 理解与 OpenCV（必须接上参数）
 - **Part A / Part B**：OpenCV 不得默认全图面积最大；**Part A** 与 **Part B** 均 **`vlm_roi`（JSON）→ 对称扩 `work_roi`**，**分割与轮廓仅**在 **`work_roi` 子图**内；候选择优 **禁止**几何中心锚点（条款同原文）。**全图兜底**仅当工作台/ROI 失效且已在 stdout **声明原因**。
 - **Part 0**：PDF **仅搜索与矩阵映射**；**圆心与半径**来自 **PNG 子图 OpenCV**（圆度 + 面积带，同旧「TP 圆拟合」精神）。
-- **修框路径**：**Part 0**：`search_pdf_text` → **`page_pdf`** → **`pdf_page_to_image` → `case10_assembly_drawing.png`** → **`rect_pdf`→ PNG ROI** → OpenCV `minEnclosingCircle` → 绿圈**；**Part B**：VLM hints → **`vlm_roi` → `work_roi`（对称扩边）** → OpenCV → 红框 annotate；**Part A**：`vlm_roi` → **`work_roi`** → OpenCV `boundingRect` → 红框 annotate；**Part C**：复制到 **`step02_*`**。
+- **修框路径**：**Part 0**：`search_pdf_text` → **`page_pdf`** → **`case10_assembly_drawing.png`**（**`page_pdf==1` 且有 `assembly_drawing_page1_png` 则复制；否则** **`pdf_page_to_image`**）→ **`rect_pdf`→ PNG ROI** → OpenCV `minEnclosingCircle` → 绿圈**；**Part B**：VLM hints → **`vlm_roi` → `work_roi`（对称扩边）** → OpenCV → 红框 annotate；**Part A**：`vlm_roi` → **`work_roi`** → OpenCV `boundingRect` → 红框 annotate；**Part C**：复制到 **`step02_*`**。
 
 ## 对话体积与 `view_image`（避免 provider 单次请求超限）
 - 多模态接口对**单条请求**体积极常有限制；反复把 **全尺寸**（如 4K 级）PNG 经 `view_image` 再塞进下一轮上下文，容易导致 **`chat` 失败**（例如网关 `max bytes to buffer` / 500）。**禁止在无关步骤重复全图 `view_image`。**
@@ -52,7 +54,7 @@
 - **禁止**跳过本段、仅在 `task.yaml` 或对话里假定某固定 **`tp_id_or_ref`** 而不落盘 **`case10_signal_to_tp.json`**。
 - **`save_text_file` → `debug/case10_signal_to_tp.json`**（**合法 JSON**）：至少含 **`user_measurement_question`**（原文回显）、**`tp_id_or_ref`**（**完整** `TPxxx`，供 Step0B **`search_pdf_text` 的 query**）、**`evidence`** 或 **`evidence_zh`**（原理图判读：网络/器件/图示 TP 与问题的对应）。后续 Part 0 **只能**以本文件中的 **`tp_id_or_ref`** 为 **权威**目标测试点。
 
-**产出（段 B 起）**：**`debug/case10_assembly_drawing_tp_marked.png`** = **`case10_assembly_drawing.png`**（**整页由 PDF 命中页渲染**）+ **绿色闭合圆**（**目标 `tp_id_or_ref`**）。绿圈 **必须**对应 **圆焊盘类轮廓**（见 Step0C 圆度与外接圆比过滤），**不得**套在非圆图形上。**每次运行必落盘**：**`debug/case10_target_tp_work_roi.png`** = 默认 **`tp_work_roi`（half=50，名义 100×100；贴边 clamp 后可能略小）** 在原图上的 **BGR 裁切**，供核对是否圈到邻居。**不要**用 `pdf_draw_circle_then_rasterize` 作为 **唯一**最终标记。
+**产出（段 B 起）**：**`debug/case10_assembly_drawing_tp_marked.png`** = **`case10_assembly_drawing.png`**（**整页 = PDF 命中页 `pdf_page_to_image`（dpi=864）**，**或**在 **`page_pdf==1`** 时经 **`assembly_drawing_page1_png` 复制**）+ **绿色闭合圆**（**目标 `tp_id_or_ref`**）。绿圈 **必须**对应 **圆焊盘类轮廓**（见 Step0C 圆度与外接圆比过滤），**不得**套在非圆图形上。**每次运行必落盘**：**`debug/case10_target_tp_work_roi.png`** = 默认 **`tp_work_roi`（half=50，名义 100×100；贴边 clamp 后可能略小）** 在原图上的 **BGR 裁切**，供核对是否圈到邻居。**不要**用 `pdf_draw_circle_then_rasterize` 作为 **唯一**最终标记。
 
 ### Step0B — PDF 文本搜索（**须先于底图栅格**；**query = `case10_signal_to_tp.json` 的 `tp_id_or_ref`**）
 - **`read_text_file`**：**`debug/case10_signal_to_tp.json`** → 取 **`tp_id_or_ref`**（须为非空字符串，如 **`TP415`**）。
@@ -62,16 +64,17 @@
 - **选定 hit 后**：记下 **`page_pdf = hits[k]["page"]`**，供 **Step0A** 与 **Step0C** 使用 **同一页**。
 
 ### Step0A — 位号 **工作底图 PNG**（**整页 = PDF 第 `page_pdf` 页**）
-- **`pdf_page_to_image`**（推荐内置工具）：`pdf_path` = **`INPUT_PATHS["assembly_drawing_pdf"]`**，**`page` = `page_pdf`**（与 Step0B 所选 hit），**`out_path`=`debug/case10_assembly_drawing.png`**，**`dpi` 固定 864**（≈ **12 px/pt**，与 **`INPUT_PATHS["assembly_drawing"]`** 历史整页 PNG 常见导出尺度一致，**避免**与旧图/旧像素手记整板缩放偏差）。**说明**：**同一轮内**只要 PNG 是 **该页整页栅格** 且 Step0C 用 **`sx=W/pw`、`sy=H/ph`**（`W,H` 为当前图实际像素），**PDF `rect_pdf` 与当前底图自洽**——不会因 dpi 不同而在「本图内部」平移错位；**864** 作为本 case **与 legacy PNG 及历史 run 对齐**的契约值。**禁止**主路径再从未经 PDF 的 **`assembly_drawing` PNG** 覆盖写入该文件。可选 **`graphics_min_line_width`**（如 **0.5**）、**`aa_level`**（如 **3**）以使细线清晰。
-- **等价 `run_python`**：`fitz.open` → `load_page(page_pdf-1)` → **`get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72), alpha=False)`**（**`dpi=864`**）→ 写入 **同一路径**；须与 **`pdf_page_to_image(dpi=864)`** 几何一致。
-- **`image_info`**：`debug/case10_assembly_drawing.png` 的 **W×H**；**`stdout`/`progress`** 写明 **`page_pdf`、`dpi`**，便于复查 **PNG 与 `page.rect` 对齐**（`sx≈W/pw`，`sy≈H/ph`，`pw,ph` 为该页 **`page.rect`** 宽高 pt）。
-- **Fallback（仅 PDF 栅格失败）**：在 **`progress`/`engineer_note`** 声明原因后，**才允许**使用 **`INPUT_PATHS["assembly_drawing"]`** 复制为 **`case10_assembly_drawing.png`**（须 **仍与命中页同源**）。
+- **Shortcut（第一页 + 预导出清晰 PNG）**：若 **`page_pdf == 1`** **且** **`INPUT_PATHS.get("assembly_drawing_page1_png")`** 为非空路径且文件存在，**则** **`shutil.copy2`**（推荐）或等价读写到 **`debug/case10_assembly_drawing.png`**。**`stdout`/`progress` 必填**：**`page_pdf=1`**、**`assembly_source=assembly_drawing_page1_png`**、源文件路径。**不要**再对同一页调用 **`pdf_page_to_image`**。**自检**：该 PNG **应**与 **864 dpi 整页栅格**在 **W×H 与纵横比**上一致或极接近，以便 Step0C 中 **`sx,sy`** 与 **`rect_pdf`** 对齐；若 OpenCV 绿圈相对丝印**系统偏移**，**丢弃 shortcut 输出**，改走下方 **`pdf_page_to_image(dpi=864)`** 重写 **`case10_assembly_drawing.png`** 后重跑 Step0C。
+- **`pdf_page_to_image`**（无 shortcut 或 shortcut 已回退时；推荐内置工具）：`pdf_path` = **`INPUT_PATHS["assembly_drawing_pdf"]`**，**`page` = `page_pdf`**（与 Step0B 所选 hit），**`out_path`=`debug/case10_assembly_drawing.png`**，**`dpi` 固定 864**（≈ **12 px/pt**，与 **`INPUT_PATHS["assembly_drawing"]`** 历史整页 PNG 常见导出尺度一致，**避免**与旧图/旧像素手记整板缩放偏差）。**说明**：**同一轮内**只要 PNG 是 **该页整页栅格** 且 Step0C 用 **`sx=W/pw`、`sy=H/ph`**（`W,H` 为当前图实际像素），**PDF `rect_pdf` 与当前底图自洽**——不会因 dpi 不同而在「本图内部」平移错位；**864** 作为本 case **与 legacy PNG 及历史 run 对齐**的契约值。**禁止**用 legacy **`assembly_drawing`** 键在 **`page_pdf!=1`** 或 **未满足 shortcut 条件**时覆盖主路径。可选 **`graphics_min_line_width`**（如 **0.5**）、**`aa_level`**（如 **3**）以使细线清晰。
+- **等价 `run_python`**（无 shortcut 或 shortcut 已回退时）：`fitz.open` → `load_page(page_pdf-1)` → **`get_pixmap(matrix=fitz.Matrix(dpi/72, dpi/72), alpha=False)`**（**`dpi=864`**）→ 写入 **同一路径**；须与 **`pdf_page_to_image(dpi=864)`** 几何一致。
+- **`image_info`**：`debug/case10_assembly_drawing.png` 的 **W×H**；**`stdout`/`progress`** 写明 **`page_pdf`**、**`dpi=864` 或 `dpi=na(assembly_drawing_page1_png)`**，便于复查 **PNG 与 `page.rect` 对齐**（`sx≈W/pw`，`sy≈H/ph`，`pw,ph` 为该页 **`page.rect`** 宽高 pt）。
+- **Fallback（仅 PDF 栅格失败，且未使用或未允许 shortcut）**：在 **`progress`/`engineer_note`** 声明原因后，**才允许**使用 **`INPUT_PATHS["assembly_drawing"]`** 复制为 **`case10_assembly_drawing.png`**（须 **仍与命中页同源**）。
 
 ### Step0C — `rect_pdf` → PNG 像素 + OpenCV 定圆
 - **`tp_work_roi` 尺寸（硬约束）**：**固定 100×100 px**（`half=50`），以 **PDF 映射到 PNG 后的文字框中心** 为锚，**clamp** 贴边；**禁止**为找圆焊盘自行扩大到 **160×160** 或更大。**0 候选**时仅在 **该 100×100（或 clamp 后实际窗口）** 内调整阈值/形态学并 **`stdout` 声明**；仍失败则 **`raise RuntimeError("case10 target TP: no pad contour after pdf-guided ROI")`**，不得扩大 ROI。
 - **`run_python`**（单脚本；**勿 `raise SystemExit`**）：
-  1. 读 **`case10_assembly_drawing.png`**（`W,H`）— **须为 Step0A 由 PDF 第 `page_pdf` 页整页栅格所得**；**`fitz.open`** PDF，**`load_page(page_pdf - 1)`**，`page.rect` → **`pw,ph`**（pt）。**`search_json` 须读 `hits` 数组**，取与 Step0B **同一**选定 hit 的 **`rect_pdf`**（**无** `top_hits` 键）。
-  2. **映射**：`sx=W/float(pw)`，`sy=H/float(ph)`；**`rect_pdf`** → PNG 整数框 **`[x0,y0,x1,y1]`**，**clamp**。（**前提**：PNG 为 **该页整页** 渲染，与 **`page.rect`** 同尺度；若用过 fallback PNG，须在 **`case10_target_tp_pdf_pick.md` / progress** 写明 **偏移或 DPI 不一致**。）
+  1. 读 **`case10_assembly_drawing.png`**（`W,H`）— **须为 Step0A 产物**：**要么** PDF 第 **`page_pdf`** 页 **`dpi=864` 整页栅格**，**要么**（仅 **`page_pdf==1`**）**经 **`assembly_drawing_page1_png` 复制**的整页图；**`fitz.open`** PDF，**`load_page(page_pdf - 1)`**，`page.rect` → **`pw,ph`**（pt）。**`search_json` 须读 `hits` 数组**，取与 Step0B **同一**选定 hit 的 **`rect_pdf`**（**无** `top_hits` 键）。
+  2. **映射**：`sx=W/float(pw)`，`sy=H/float(ph)`；**`rect_pdf`** → PNG 整数框 **`[x0,y0,x1,y1]`**，**clamp**。（**前提**：PNG 为 **该页整页** 渲染，与 **`page.rect`** 同尺度；若用过 **`assembly_drawing_page1_png`**、**`assembly_drawing` fallback** 或其它非 864 栅格，须在 **`case10_target_tp_pdf_pick.md` / progress** 写明 **偏移或 DPI 不一致**；**错位则回退 Step0A，改用 **`pdf_page_to_image`（dpi=864）** 重写底图。**）
   3. **构造 `tp_work_roi`**：`cx = int(round((x0 + x1) / 2))`，`cy = int(round((y0 + y1) / 2))`，**半边 `half=50`** → `wl,wt,wr,wb = cx-50, cy-50, cx+50, cy+50`，**clamp** 到图内（贴边若使窗口不足 100，以 clamp 后窗口为准）。
   4. **`work_roi` 裁切落盘（必做）**：从 **`full`** 取 **`roi_bgr = full[wt:wb, wl:wr]`**（OpenCV 行 `y`、列 `x`），**`cv2.imwrite("debug/case10_target_tp_work_roi.png", roi_bgr)`**。**禁止** `roi_bgr = full`、`imwrite` 整图或 **`roi = img` 之类占位** —— `case10_target_tp_work_roi.png` **必须** 与 **`(wl,wt,wr,wb)`** 子窗口 **像素尺寸一致**（非全图尺寸）。**每次运行都必须写出**；名义上为 **100×100**，clamp 后宽高可能 **小于 100**，以实际像素为准。**`stdout`** 须同时写明 **文件路径**（**`case10_target_tp_work_roi.png`**）与 **`size=WxH`**，**禁止**只打印尺寸而不 `imwrite`、或令人生疑的泛化句（如仅 `Saved work_roi: 100x100` 而无路径）。
   5. 在 **步骤 4 的 ROI 子图** → 灰度 → **`THRESH_BINARY_INV`** → **弱 dilate（≤3×3, iter≤1）** → **`findContours`**。**目标 TP 在位号图上必须是「圆焊盘/圆环」类轮廓**：**禁止**把矩形丝印、走线、文字笔画等 **非圆闭合形状** 当选中对象后再强行 `minEnclosingCircle` 画绿圈（外观会像「圈住了根本不是圆的东西」）。**硬过滤（须实现， stdout 打印每项）**：
@@ -79,13 +82,20 @@
      - **`boundingRect` 短边/长边** ≥ **0.72**（近正方形外包，排除长条）。
      - **圆拟合一致**：设 `(xc,yc), r = minEnclosingCircle`，要求 **`area / (π r²)` ∈ [0.40, 1.05]`**（实心圆盘约 1；镂空圆环可偏低，但不得与细长条套大圆混淆——若 `circ` 已低应已被剔除）。
      仅 **同时满足** 以上条的轮廓进入候选；**多候选时** 再取 **圆心距 ROI 内参考点** **最近** 者：参考点为 **PDF 映射文字框中心**在 ROI 内 **`(cx - wl, cy - wt)`**（与步骤 3 的 `cx,cy` 一致）；若该点落在 ROI 外则用 **ROI 几何中心** `((wr-wl)/2, (wb-wt)/2)`。**禁止**只凭面积最大或只看圆度不看形状类别。
+  **5b. 浅色细线丝印圆（粉/浅红圈 + 白底，灰度主路径 0 候选时）**：**仍在同一 100×100 ROI 内**，**不得**扩大 `tp_work_roi`。**须**在 **`stdout`** 声明 **`step0c_path=faint_hsv_ring`** 后再用本条（与主路径二选一择优：**若主路径已有合格候选则不必走本条**）。流程：
+     1. ROI **BGR → HSV**； **`cv2.inRange`** 抓浅红/粉丝印（起点示例：**H∈[0,12]∪[168,179]**、`cv2` 用 0–179；**S∈[12,255]**；**V∈[70,255]**）。若 mask 过稀，**仅在本 ROI 内**把 **S 下限降到 8–15** 或 **V 上限微降**重试 **一次**，并 **`stdout` 打印所用范围**。
+     2. **`cv2.morphologyEx(..., MORPH_CLOSE)`**：核 **3×3 或 5×5**，**1～2 次**；再接 **≤3×3 `dilate`、iter≤1**，使细断圆环连成 **单连通** 前景。
+     3. **`findContours`** 后过滤：**须**排除 **明显长条**（短边/长边 **< 0.55** 且 perimeter 很大者）。**细线圆环**允许略宽判据：**`circ ≥ 0.55`** **且** **`area/(π r²) ∈ [0.10, 1.12]`**（`r` = `minEnclosingCircle`），**且** 圆心距 **步骤 5 同一参考点** ≤ **28 px**（避免抓到远处走线弧）。**多候选**仍取距参考点 **最近** 者。
+     4. **禁止**：不打印 **`faint_hsv_ring`** 就大幅放宽圆度乱套轮廓；**禁止**用本路径套 **矩形丝印块**（短长比过低且 `area/(πr²)` 偏离过大者应剔除）。
   6. 在 **`full`**（与步骤 1 同读的 BGR）上 **`cv2.circle(..., (0,255,0), thickness)`**，**`cv2.imwrite("debug/case10_assembly_drawing_tp_marked.png", full)`**。
-  7. **`stdout`**：`tp_work_roi`（`wl,wt,wr,wb`）、**`work_roi_png`**、**`sx,sy,pw,ph`**、圆心半径；可选 **`debug/case10_target_tp_opencv_debug.png`**（可在 debug 图上叠 ROI 矩形）。
-  8. **0 候选**：**不得**改用更大 `tp_work_roi`；仅允许回本步调参重试；**仍无**则 **`raise RuntimeError("case10 target TP: no pad contour after pdf-guided ROI")`**。
+  7. **`stdout`**：`tp_work_roi`（`wl,wt,wr,wb`）、**`work_roi_png`**、**`sx,sy,pw,ph`**、圆心半径及 **`step0c_path`**（**`gray_thresh`** 或 **`faint_hsv_ring`**）；可选 **`debug/case10_target_tp_opencv_debug.png`**（可在 debug 图上叠 ROI 矩形）。
+  8. **0 候选**：**不得**改用更大 `tp_work_roi`；仅在 **步骤 5 与 5b** 内调参/各试一轮；**仍无**则 **`raise RuntimeError("case10 target TP: no pad contour after pdf-guided ROI")`**。
 
 ---
 
 ## Part B — 位号图：最大 IC（**底图 = 已带 TP 绿圈**；**主路径 = VLM `vlm_roi` → `work_roi` 内 OpenCV**）
+
+**位号图不清晰时的「最大 IC」操作定义（防误判屏蔽罩）**：丝印/线稿 **对比度低、细节糊** 时，模型易把 **金属屏蔽罩、屏蔽壳、较大不规则导电盖** 当成「整页最大芯片」。**Part B 须按下述统一口径**：在全页（`tp_marked` 底图）上选 **`vlm_roi` 目标时，以「面积最大的矩形类封装器件」为「最大 IC」**——即 **外包络以矩形/准矩形为主** 的集成电路本体（典型 **QFP/QFN/LQFP 等**：中央塑封块 + **四面引脚/焊盘带** 在图上常呈 **矩形环或双层矩形**）。**不要将** **圆形/椭圆顶金属罩、单块不规则大金属外形（常见屏蔽结构）** 默认当作本规程的「最大 IC」；若整页 **可见多颗件**，在 **矩形封装** 子集里取 **包围盒面积最大** 者罩进 `vlm_roi`；若 **矩形 QFP 与更大块屏蔽罩并存**，**以该矩形 QFP 为准**，除非全页 **确实无** 更大矩形 IC（须在 **`spatial_description` / `rationale_zh` 写明**）。StepB3 QC 核对第 1 条时同此口径。
 
 ### StepB1 — VLM 与 hints
 - **（可选）网格参考线，助 VLM 估准 `vlm_roi`**：位号图多为 **线稿 + 缺乏天然「块」纹理**，模型估 **像素级 bbox** 时容易 **整体平移或角点飘**；叠一层 **稀疏、浅色、半透明** 的 **等距网格**（仅视觉辅助）常能 **改善相对定位**——例如结合「大约在横向第几格、纵向第几格」与丝印推理，**但不保证**每次有效。**注意**：线 **过密/过粗** 会 **盖住丝印或与走线混淆**；网格 **只给 VLM 看图用**，**不得**作为 OpenCV 分割底图。**推荐**：`run_python` 复制 **`debug/case10_assembly_drawing_tp_marked.png`** → 按固定 **`step_px`**（如 **128**，或按宽高取约 **15～25 条**横纵线）画 **`cv2.line`**，**浅灰 + 与原图 alpha 混合**（或极低对比度），写出 **`debug/case10_assembly_drawing_tp_marked_grid.png`**（**W×H 与 `tp_marked` 必须一致**）。**`view_image`** 估框时 **可用带网格版**；写入 **`case10_assembly_vlm_hints.json` 的 `vlm_roi`** 仍是 **与原图相同的像素坐标**（可选记 **`grid_step_px`**、`vlm_visual_aid` 路径供复查）。
@@ -108,7 +118,7 @@
 - **工具顺序（硬约束）**：**`annotate_image`** → **`debug/case10_assembly_largest_ic_box.png`** → **下一动必须是 `view_image`（同一 PNG；运行时会写入 `debug/case10_stepb3_viewed_largest_ic_box.json`，`finish` 校验其与当前 PNG 的 mtime 一致；每次覆盖该 PNG 会清除 gate，须重新 view）** → 正文 **StepB3 清单核对** + **`QC_PASS` / `QC_REVISE`**。若 **`QC_REVISE`**：**改 hints → StepB2 → 再 `annotate_image` 覆盖 PNG → 再 `view_image`**，直至 **`QC_PASS`**。**仅当**本轮回合以 **`QC_PASS`（或 `QC_PASS_WITH_CAVEATS`）结束时**，才允许 **`save_text_file` → `debug/case10_assembly_largest_ic.json`** 与 **进入 Part A**。**禁止**「画完红框 → 直接写 JSON / 直接开实物图」跳过 QC；**禁止未看图**在正文写 **`QC_PASS`**。
 - **`annotate_image`**：**`path`=`debug/case10_assembly_drawing_tp_marked.png`**，**`points`** 仅 IC 红框一项，**`out_path`=`debug/case10_assembly_largest_ic_box.png`**。
 - **`view_image`（宣布 QC 前必做）**：**`debug/case10_assembly_largest_ic_box.png`**（每轮红框更新后 **至少一次**；首轮回合在 `annotate_image` 后 **立即**）。**在正文写 `QC_PASS` / `QC_REVISE` 之前**，须在图上逐项核对（**不可**未看图就默认通过）：
-  1. **最大 IC**：红框是否套在**位号图整页范围内面积最大的那颗封装 IC**（与 StepB1 `spatial_description` / 常识一致，通常即 U501 类 **最大 QFP**），而不是**更小**的邻近 IC、连接器轮廓或**仅丝印字块**。若肉眼可见 **页面上仍有更大独立封装未被红框覆盖** → **必须 `QC_REVISE`**（说明更大件在图的哪一侧/哪一颗），**禁止**写 **`QC_PASS`**。
+  1. **最大 IC（线稿位号图）**：红框是否套在**整页范围内、按矩形封装口径选出的最大那颗 IC**（见 Part B 段首「矩形封装 / 防屏蔽罩」操作定义），通常即 **最大 QFP/LQFP 类矩形本体 + 可见引脚带**，而不是 **更小邻近 IC**、**连接器**、**仅丝印字块**、也不是把 **圆形/不规则大屏蔽罩** 误当「最大芯片」。若肉眼可见 **页面上仍有更大的矩形封装未被红框覆盖** → **必须 `QC_REVISE`**，**禁止**写 **`QC_PASS`**。
   2. **完整性**：**塑封主体**与**四面可见的引脚/焊盘带**是否均在框内；任一侧**明显裁脚、只框到局部、或框重心明显落在错误器件上** → **必须 `QC_REVISE`**（写明偏哪一侧/套错哪颗），**禁止**为省事写 **`QC_PASS`**。
   3. 若需核对 **`vlm_roi` / `work_roi` 与红框关系**，**可** **`view_image`** **`debug/case10_assembly_opencv_debug.png`**（**整图至多再增加这一次**）；**更推荐**对 **`case10_assembly_largest_ic_box.png`** 用 **`crop_image`** 只裁 **IC 邻域** 后 `view_image`，以控制请求体积。
 - **`QC_PASS`/`QC_REVISE`**（≤**3** 轮）：须与上图自检结论一致。**位号图 Part B（与 Part A 区分）**：**必须至少经历一次** **`QC_REVISE`** 闭环（改 hints → StepB2 → 再画红框 → 再 view）后再 **`QC_PASS`**；**禁止**首轮看图后直接 **`QC_PASS`** 且 **`qc_rounds_used==1`**（`finish` 契约要求 **`part_b_stepb3_qc.qc_rounds_used`≥**`2`**）。**实物图 Part A** 不设「必须 REVISE」轮数下限。**`QC_REVISE`**：改 **`case10_assembly_vlm_hints.json`** 中 **`vlm_roi`**（必要时 **`spatial_description`**）→ **下一工具必须是 StepB2 `run_python`** → **再 `annotate_image` 覆盖 **`debug/case10_assembly_largest_ic_box.png`**（新 bbox，必选）** → 再 **`view_image`** ……直至 **`QC_PASS`**。
@@ -324,7 +334,48 @@
 
 ---
 
-## Part D — Step3–8（**默认 Part D**）：双 ROI + **路径 A 直接对照（试）** + **路径 B 规律 + OpenCV**
+## Part D — 默认：`case12_step02_opencv_ic_align`（整图 Step2 + OpenCV 双红框 IC 对齐）
+
+**前提**：**Part C** 已产出 **`debug/step02_locator_front_anchor.png`**、**`debug/step02_board_front_anchor.png`**（两张图 **均有** 与规程一致的 **IC 红框** + 位号侧 **TP 绿圈**）。**本 Part 不**再走 Step3 红框匹配、双 ROI、Step5–7 候选链；**目标 TP 在板图上的像素**由 **case12 图对齐** 直接算出。
+
+**契约**：**`debug/step03_mapping.json`** **至少**含 **`"mapping_method": "case12_step02_opencv_ic_align"`**（可无 `locator_box` / `u,v` 等旧键；`finish` 对该路径走独立门禁）。
+
+### StepD1 — 位号 Step2 抽象图（OpenCV）
+- **`run_python`**（仓库根须在 `sys.path`；`WORKSPACE` 为 agent 工作区）：
+  1. `from pathlib import Path`
+  2. `import os`
+  3. `from case12_step02_graph import run_build_step02_locator_graph`
+  4. `run_build_step02_locator_graph(Path(os.environ["WORKSPACE"]))`
+- **产出**：**`debug/case12_step02_locator_graph.json`**、**`debug/case12_step02_locator_graph.png`**。
+
+### StepD2 — 实物↔位号 IC 红框对齐（纯 OpenCV）
+- **输入**：**`step02_*_anchor.png`** 上的 **HSV 红框**（与 legacy **`run_align_locator_graph_to_board_ic_bbox`** 一致）；**两图均需清晰红框**。
+- **`run_python`**：
+  1. `from case12_step02_graph import run_align_locator_graph_to_board_ic_bbox`
+  2. `run_align_locator_graph_to_board_ic_bbox(Path(os.environ["WORKSPACE"]))`
+- **或 CLI**：`python case12_step02_graph.py align-board --mode opencv-red`
+- **产出**：**`debug/case12_board_points_aligned.json`**（**`source`** = **`opencv_ic_bbox_isotropic_align`**）、**`debug/case12_board_approx_overlay_opencv.png`**（整板 TP/ref 叠标，用于自检）。
+
+### StepD3 — Step8 定稿 + 映射标签
+- **`read_text_file`**：**`debug/case12_board_points_aligned.json`** → 取 **`board_roi_target_px_approx`** = **`[x, y]`**（**全板** **`step02_board_front_anchor.png`** 像素系）。
+- **`annotate_image`**：**`path`** = **`debug/step02_board_front_anchor.png`**，在 **`[x,y]`** 处画 **红色** 整圆/十字（半径与 **`tp_green_radius_px`×`transform.s`** 相当或 **≥10px**），**`out_path`** = **`debug/step08_final_tp.png`**。
+- **`save_text_file` → `debug/step08_result.json`**：至少 **`pixel`**：**`[x, y]`**（与上完全一致）；**`selected_id`** 建议 **`"case12_graph_align"`**；**`marker_radius`** 与 annotate 半径一致（供复查）。
+- **`save_text_file` → `debug/step03_mapping.json`**（覆盖或新建）：**仅**填 **`mapping_method`**：**`"case12_step02_opencv_ic_align"`**（可加 **`notes`** 说明本路径跳过 Step4–7）。
+
+### StepD4 — 结束
+- **`finish`**：`answer.pixel` = **`[x, y]`**（与 **`step08_final_tp.png`** / **`step08_result.json`** 一致，±1px）。
+
+### CLI 实验：`python -m agent run <task.yaml> --mode vlm_test`
+- **不修改** **`task.yaml`**；首轮 **Task** 文本自动附带 **`vlm_test` 规程附录**。
+- **与默认本节差异**：仍 **Part 0 → Part B**；**跳过 Part A（实物 IC 红框 annotate）**；**Part D** 用 **`mapping_method` = `case12_step02_vlm_ic_align`**，**依赖 VLM** 写 **`debug/case12_board_largest_ic_bbox_vlm.json`** 并由 **`run_align_locator_graph_to_board_ic_bbox_vlm`**（见 **`case12_step02_graph.py`**）算出 **`case12_board_points_aligned.json`**（**`source`=`vlm_ic_correspondence_isotropic_align`**）。**`finish` 门禁**见 **`agent/agent.py`**（**不要求** **`board_tp_marked.png`**）。
+- **环境变量**：未传 CLI 时可用 **`VLM_AGENT_WORKFLOW_MODE=vlm_test`**（一般由 CLI 写入 **`Config.workflow_mode`**）。
+- **工具门禁**：`workflow_mode=vlm_test` 时，运行时设置 **`VLM_AGENT_WORKFLOW_MODE`**，并由 **`annotate_image`** / **`save_text_file`** / **`run_python`（源码扫描）** / **`case12_step02_graph.run_align_locator_graph_to_board_ic_bbox`** **禁止**再产出 **`case10_largest_ic_*`**（Part A）或调用 legacy **OpenCV 实物 IC 红框对齐**，并 **禁止在实物底板 raster 上先期用 CV/脚本画 bbox 来定 IC**，以免把 **`case12_board_largest_ic_bbox_vlm.json`** 变成「借壳」——须走 **`run_align_locator_graph_to_board_ic_bbox_vlm`**，且 VLM JSON 中的数须来自 **看图推理**（不要用 OpenCV **先跑一次再抄数**）。
+
+---
+
+## Part D-alt — 备用：`case10_dual_roi_layout`（双 ROI + 路径 A / B + Step3–8）
+
+**声明方式**：**`debug/step03_mapping.json`** 中 **`mapping_method`** = **`"case10_dual_roi_layout"`**（并含 Step3 所要求的 **`locator_box`, `board_box`, …**）。**勿**与本节默认的 **`case12_step02_opencv_ic_align`** 混用。
 
 **目的**：在 Part C 先验之后，**同尺寸的** locator / board 裁块上 **优先试路径 A**：位号 ROI 上 **OpenCV 自动拣 2–3 个邻近 ref**（**`case10_dual_roi_locator_refs.json` + `step04_locator_roi_refs.png`**），给出 **相对 tp 的距离与方位**；VLM 再据 **`step04_roi_crop`** 给出 **`board_roi_target_px_approx`** 与匹配的 **`board_roi_reference_approx`**；**`step04_dual_roi_approx_only.png`** 叠 **tp + 多 ref**（无焊盘检测候选）做 **视觉自检**（必要时 **一次**改点）；**OpenCV snap** **仅**对 **目标 tp** 落到真实焊盘圆心。**若 snap / QC 失败** → 可选 **编号候选图** 或 **路径 B**。**取代**旧版 **`run_candidate_pipeline`** 默认链。
 **权重（路径 B）**：**VLM 规律 / `target_cell` > 候选几何落格**；prior 仅 **平局/自检**。**路径 A**：**近似点**须经 **叠图自检**；**最终几何**以 **snap 后 refined** 为准（主路径）；**fallback** 时可用 **VLM 在编号图上选 id**。
@@ -360,7 +411,15 @@
 - **禁止**：在**未交代**本 ROI 内器件与 TP 全貌（力所能及范围内）的情况下，只写一句「第几列第几个」；**禁止**把看不清说成看清——看不清须 **`confidence` 降低** 并倾向 **路径 B / 扩大 ROI**。
 
 ### StepD4.5 — **路径 A｜双 ROI 直接对照**（**先试**；在 StepD5 **规律法** 之前）
-- **思想**：两裁块 **仅保证同 WxH**，便于 **并排对照**；**位号 ROI** 以 **绿心** 为锚、**实物 ROI** 以 **Step3 先验** 为锚，**二者内容不是同一像素坐标系，也不能假设「中心互相对齐」**。**位号侧**须先完成 **「位号图 ROI → VLM 固定任务」**；再在 **实物 ROI** 上找 **与位号布局同构** 的结构，给出 **板 ROI 内** 近似点；**StepD4.5B** 先用 **清晰叠加图** 让 VLM **核对 approx**，**至多修正一次**，再 **snap** 得亚像素级圆心。
+- **思想**：两裁块 **仅保证同 WxH**，便于 **并排对照**；**位号 ROI** 以 **绿心** 为锚、**实物 ROI** 以 **Step3 先验** 为锚，**二者内容不是同一像素坐标系，也不能假设「中心互相对齐」**。**位号侧**须先完成 **「位号图 ROI → VLM 固定任务」**；再在 **实物 ROI** 上找 **与位号布局同构** 的结构，给出 **板 ROI 内** 近似点；**StepD4.5B** 先用 **清晰叠加图** 让 VLM **核对 approx**，**至多修正一次**，再 **finalize**（默认 scaled 半径，可选 snap）。
+- **锚点图结构冻结（路径 A；`step04_locator_roi_refs` → `approx_only`）**：
+  - **`debug/case10_dual_roi_locator_refs.json`** 与 **`debug/step04_locator_roi_refs.png`** 定义 **已由 OpenCV 固定的抽象图**：节点 = **目标 TP（绿圈质心，`tp_center_roi`）+ 每个 `ref_*`**；**`pairwise_roi`** 为上述节点在 **位号 ROI 像素** 下的 **两两边**（距离与 `dx/dy`/角）；**`graph_edges`** 为 **tp→ref** 星形。**该图的结构（谁与谁相邻、哪条边多长/朝哪）是输入契约，不是 VLM 可改写的设计稿。**
+  - **VLM 写 `case10_tp_dual_roi_direct_vlm.json`、并最终由脚本绘制 `step04_dual_roi_approx_only.png` 时**：
+    - **`board_roi_reference_approx`**：**必须**与 **`references[]`** **同 `ref_id` 集合、同条数、一一对应**（不得省略、不得新增脚本未输出的 `ref_id`、不得改名）。
+    - **禁止**：把位号上 **`ref_i`** 对应的器件类型/角色 **换配** 到实物上 **另一家 `ref_j`**（**锚点换位 / 语义串台**）；禁止仅凭「更像」**重写**锚点编号而不 **重跑 StepD4.0**。
+    - **允许**：在实物 ROI 内用 **同一套 `ref_id` 标签**，通过 **整体平移 + 近似均匀缩放 + 少量像素噪声**，使板上各点之间的 **相对几何** 与 **`pairwise_roi`** **一致或可解释地接近**；**`board_roi_target_px_approx`**（TP）须与 **`tp_center_roi`** 在位号侧相对各 **`ref_*`** 的 **方位关系同构**。
+    - **若实物 ROI 无法支持上述同构**（裁切不足、遮挡、与位号侧拓扑矛盾）：须 **`board_roi_target_px_approx`=null**（并处理 `board_roi_reference_approx` 为一致态或省略规则见路径 B）、**降低 `confidence`**、**`use_fallback_pattern_path`=true** 或 **同步扩大 board/locator ROI 后重跑 StepD4 + StepD4.0**，**禁止**为省事 **拆掉或篡改** 锚点图拓扑来写一个「看似接近」的 approx。
+  - **`comparison_zh`**：**须逐个点名** 每个 **`ref_id`** 在 **`step04_roi_crop.png`** 上对应 **哪颗/哪类** 器件，并声明与 **`step04_locator_roi_refs.png`** 上 **同色/同标签框** 为 **同一角色**（不得只描述 TP 而不锁 ref）。
 - **`board_roi_target_px_approx` 的推理约束（契约级）**：
   - **必须**：**只依据** 两幅 ROI 里 **能看到的器件 / TP / 孔 / 连接器** 的 **相对排布**，在实物图上指认「与位号绿圈所在那一格 **同构** 」的焊盘，再估计其圆心在 **board ROI 像素** 下的 `(cx,cy)`；`comparison_zh` 须写清 **左/中/右列、与邻件的相对方位** 等 **可核对** 证据链。
   - **禁止**：以 **「ROI 裁切以先验为中心 → 先验落在 ROI 几何中心附近 → 故目标必在 ROI 中心 / 中心列中点 / 正中焊盘」** 等 **几何对称或中心法则** 猜点（**两 ROI 锚点不同，严禁当叠图对齐**）。
@@ -382,7 +441,7 @@
 - **默认**：**不要**把 **满屏编号候选** 当作主流程必看图（易乱）；改用 **`step04_dual_roi_approx_only.png`**。
 - **B1 — 叠图（`run_python`）**：读 **`step04_roi_crop.png`** + **`case10_tp_dual_roi_direct_vlm.json`**，在 **板 ROI 拷贝** 上绘制 **`board_roi_target_px_approx`**（品红 **tp** 十字）+ **`board_roi_reference_approx`** 各 **ref**（异色十字 + **tp→ref 浅色连线**，**ref–ref 浅灰连线**（与位号侧 `step04_locator_roi_refs` 一致），`clamp` 在图内）。**不得**叠画 OpenCV **焊盘检测**候选圆。推荐 **`case10_dual_roi_refine.run_write_approx_overlay_from_workspace(Path.cwd())`** → **`debug/step04_dual_roi_approx_only.png`**。若需同时看一眼搜索半径，可 **`draw_search_radius=True`**（淡圈，**可选**；**仅**在 **`geom_refine.mode`** 为 **snap** 时有意义）。
 - **B2 — 看图自检（`view_image`）**：**必须** **`view_image`** **`debug/step04_dual_roi_approx_only.png`**。对照 **`step04_locator_roi_refs.png`**、**`case10_dual_roi_locator_refs.json`**、**中文字段**，判断 **tp 与各 ref 的相对几何** 是否与位号侧 **一致**；**tp 十字** 须落在 **与绿圈同构** 的目标焊盘（容许 **小幅像素误差**；**明显错格/错列**须走 B3）。
-- **B3 — 至多一次修正 approx**：若自检不通过，**仅允许一次** **`save_text_file` 覆盖** **`case10_tp_dual_roi_direct_vlm.json`** 中的 **`board_roi_target_px_approx`** 与（若已写）**`board_roi_reference_approx`**（整数 ROI 像素），并写入 **`approx_revision_zh`** 说明 **依据**。然后 **重复 B1**；**可再 `view_image` 新叠图至多一次**。**禁止**无原因反复改坐标蹭步数。
+- **B3 — 至多一次修正 approx**：若自检不通过，**仅允许一次** **`save_text_file` 覆盖** **`case10_tp_dual_roi_direct_vlm.json`** 中的 **`board_roi_target_px_approx`** 与（若已写）**`board_roi_reference_approx`**（整数 ROI 像素），并写入 **`approx_revision_zh`** 说明 **依据**。修正 **仅限坐标微调** 以满足 **与 `pairwise_roi` 同构**；**不得**在此步 **改 `ref_id` 集合、换锚语义或改拓扑**。然后 **重复 B1**；**可再 `view_image` 新叠图至多一次**。**禁止**无原因反复改坐标蹭步数。
 - **B4 — finalize（`run_python`）**：**默认**：圆心 = **（最终）**`board_roi_target_px_approx`**；半径 = **`tp_green_radius_px`**（来自 `case10_dual_roi_locator_refs.json`）× **结构比例 scale**（优先 **ref–ref**：板上两 ref 间距 ÷ 位号侧 `pairwise_roi` 同对间距，取 **中位数**；否则 **tp–ref** 中位数）。写出 **`debug/case10_tp_dual_roi_direct_refined.json`** + **`debug/step04_dual_roi_direct_snap.png`**（品红 approx、绿色圆；文件名沿用）。推荐 **`case10_dual_roi_refine.run_snap_nearest_from_workspace(Path.cwd())`** 或 **`run_dual_roi_finalize_from_workspace`**（等价）。**`stdout`**：**PASS/FAIL**、**scale**、**r_vis**；**`selection_method`** 为 **`vlm_approx_scaled_radius`**。
 - **可选 OpenCV snap**：在 **`case10_tp_dual_roi_direct_vlm.json`** 设 **`geom_refine.mode`** 为 **`snap_nearest_in_search_radius`** 后重跑 B4：**高召回** 圆候选 → 距 approx ≤ **`search_radius_px`** 且满足 **`min_circularity`** 者中 **最近**（**并列圆度更高优先**）→ 仍写同一 refined / PNG（吸附线仍画 approx→snap 点）。
 - **失败与歧义**：**`qc_direct_path==FAIL`**（例如 **无足够 ref 对推算 scale**）时，**允许** **一次** 补全 **`board_roi_reference_approx`** 或略调 **`geom_refine`**（或改走 **snap 模式**）后重跑 **B4**；仍失败 → **StepD4.5C** 或 **StepD5–D7（路径 B）**。
@@ -432,7 +491,7 @@
 
 ### Part 0 — 原理图→TP + PDF → 绿圈（位号 PNG）
 1. **`view_image`（原理图）** + **`save_text_file`** → **`case10_signal_to_tp.json`**（**`tp_id_or_ref`**）。
-2. **`search_pdf_text`**（**`query`=`tp_id_or_ref`**）→ **`case10_target_tp_pdf_search.json`**；**`pdf_page_to_image`**（`page`=`hits` 选定页，**dpi=864**）→ **`case10_assembly_drawing.png`**；**`run_python`**（Step0C）→ **`case10_target_tp_work_roi.png`**（必写）+ **`case10_assembly_drawing_tp_marked.png`**（+ 可选 **`case10_target_tp_opencv_debug.png`**）。
+2. **`search_pdf_text`**（**`query`=`tp_id_or_ref`**）→ **`case10_target_tp_pdf_search.json`**；**底图**：若 **`page_pdf==1`** 且有 **`assembly_drawing_page1_png`** → **复制** → **`case10_assembly_drawing.png`**，**否则** **`pdf_page_to_image`**（**dpi=864**）→ **`case10_assembly_drawing.png`**；**`run_python`**（Step0C）→ **`case10_target_tp_work_roi.png`**（必写）+ **`case10_assembly_drawing_tp_marked.png`**（+ 可选 **`case10_target_tp_opencv_debug.png`**）。
 
 ### Part B — 位号最大 IC（底图 **`tp_marked`**）
 1. **StepB1**：`**view_image`** + **`case10_assembly_spatial_description.md`** + **`case10_assembly_vlm_hints.json`**。
@@ -456,7 +515,7 @@
 
 ### 最终产物清单
 - **原理图/目标 TP**：**`case10_signal_to_tp.json`**（**`tp_id_or_ref`** + 依据）
-- **PDF/TP**：`case10_target_tp_pdf_search.json`、`case10_target_tp_pdf_pick.md`（可选）、**`case10_assembly_drawing.png`（PDF 命中页 `pdf_page_to_image`，dpi=864）**、**`case10_target_tp_work_roi.png`**（必）、`case10_assembly_drawing_tp_marked.png`、`case10_target_tp_opencv_debug.png`（可选）
+- **PDF/TP**：`case10_target_tp_pdf_search.json`、`case10_target_tp_pdf_pick.md`（可选）、**`case10_assembly_drawing.png`**（默认：`pdf_page_to_image`、**dpi=864**；**或** **`page_pdf==1`** 且提供 **`assembly_drawing_page1_png` 时由其复制**）、**`case10_target_tp_work_roi.png`**（必）、`case10_assembly_drawing_tp_marked.png`、`case10_target_tp_opencv_debug.png`（可选）
 - **位号 IC**：`case10_assembly_spatial_description.md`、**`case10_assembly_vlm_hints.json`**、`case10_assembly_largest_ic_box.png`、**`case10_assembly_largest_ic.json`**、`case10_assembly_opencv_debug.png`（可选）
 - **实物 IC**：`case10_board_landscape.png`、`case10_spatial_description.md`、**`case10_vlm_hints.json`**、`case10_largest_ic_box.png`、`case10_largest_ic.json`、`case10_opencv_debug.png`（可选）
 - **Step2 锚点 + 映射**：`step02_board_front_anchor.png`、**`step02_locator_front_anchor.png`**、**`board_tp_marked.png`**、**`case10_tp_board_mapping.json`**（可选复查）

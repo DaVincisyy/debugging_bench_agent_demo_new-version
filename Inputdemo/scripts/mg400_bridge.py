@@ -288,22 +288,29 @@ def action_command(payload):
     name = command.get("name")
     robot = Mg400(config)
     try:
-        robot.connect()
         if name == "pose":
+            robot.connect_dashboard()
             return {"ok": True, "action": name, "robot": status(robot)}
         if name == "clearError":
+            robot.connect_dashboard()
             result = require_ok(robot.dash("ClearError()"))
         elif name == "enable":
+            robot.connect_dashboard()
             result = enable_robot(robot, config)
         elif name == "disable":
+            robot.connect_dashboard()
             result = require_ok(robot.dash("DisableRobot()"))
         elif name == "pause":
+            robot.connect_dashboard()
             result = require_ok(robot.dash("Pause()"))
         elif name == "continue":
+            robot.connect_dashboard()
             result = require_ok(robot.dash("Continue()"))
         elif name == "reset":
+            robot.connect_dashboard()
             result = require_ok(robot.dash("ResetRobot()"))
         elif name == "jog":
+            robot.connect()
             prepare = prepare_for_motion(robot, config)
             axis = str(command.get("axis", "")).upper()
             if axis not in {"X+", "X-", "Y+", "Y-", "Z+", "Z-", "R+", "R-", "J1+", "J1-", "J2+", "J2-", "J3+", "J3-", "J4+", "J4-"}:
@@ -311,8 +318,10 @@ def action_command(payload):
             result = require_ok(robot.move(f"MoveJog({axis})"))
             result = {"motionPrep": prepare, **result}
         elif name == "jogStop":
+            robot.connect_motion()
             result = require_ok(robot.move("MoveJog()"))
         elif name == "move":
+            robot.connect()
             prepare = prepare_for_motion(robot, config)
             pose = resolve_partial_pose(robot, command.get("pose", {}))
             move_name = command.get("motionCommand") or config.get("motionCommand", "MovJ")

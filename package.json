@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "start": "npm --prefix Inputdemo start",
+    "robot-gateway": "npm --prefix Inputdemo run robot-gateway",
+    "vlm:case": "npm --prefix Inputdemo run vlm:case --",
     "demo": "npm --prefix Inputdemo run demo",
     "test": "npm --prefix Inputdemo test"
   },

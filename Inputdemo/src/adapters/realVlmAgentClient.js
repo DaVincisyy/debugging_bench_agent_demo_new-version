@@ -65,7 +65,8 @@ export class RealVlmAgentModelClient {
   async generateMg400Pose({ input, vlmAgentCase }) {
     const result = await this.runner.run({ input, vlmAgentCase });
     const finalAnswer = result.finalAnswer || {};
-    const pose = normalizePose(finalAnswer.mg400Pose || finalAnswer.mg400_pose || finalAnswer.pose);
+    const pose = normalizePose(finalAnswer.mg400Pose || finalAnswer.mg400_pose || finalAnswer.pose)
+      || poseFromPixel(result.pixel || finalAnswer.pixel);
 
     return {
       model: result.model,
@@ -83,7 +84,7 @@ export class RealVlmAgentModelClient {
       precheck: result.precheck,
       attempts: result.attempts || [],
       reason: pose
-        ? "Real VLM agent returned an MG400 pose."
+        ? "Real VLM agent returned or derived an MG400 pose."
         : "Real VLM agent returned localization output; MG400 pose was not present in final_answer."
     };
   }
@@ -99,4 +100,12 @@ function normalizePose(value) {
   };
   if (Object.values(pose).some((item) => !Number.isFinite(item))) return null;
   return pose;
+}
+
+function poseFromPixel(value) {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y), z: 0, r: 0 };
 }

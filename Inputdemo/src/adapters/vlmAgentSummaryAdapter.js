@@ -1,8 +1,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { defaultVlmAgentRunsDir } from "./defaultPaths.js";
 
 export class VlmAgentSummaryAdapter {
-  constructor({ runsDir = path.join(process.cwd(), "output", "vlm-agent-runs") } = {}) {
+  constructor({ runsDir = defaultVlmAgentRunsDir() } = {}) {
     this.runsDir = runsDir;
   }
 

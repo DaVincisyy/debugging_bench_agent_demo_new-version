@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { readMg400Config } from "./mg400Config.js";
 import { SimulationArmController } from "./simulationArmController.js";
@@ -7,7 +8,20 @@ import { evaluateMg400PoseReachability } from "../domain/mg400Reachability.js";
 const bridgePath = path.resolve("scripts", "mg400_bridge.py");
 
 function getPythonCommand() {
-  return process.env.PYTHON || process.env.PYTHON_EXE || "python";
+  const homeDir = process.env.USERPROFILE
+    || (process.env.HOMEDRIVE && process.env.HOMEPATH ? `${process.env.HOMEDRIVE}${process.env.HOMEPATH}` : null);
+  const localAppData = process.env.LOCALAPPDATA || (homeDir ? path.join(homeDir, "AppData", "Local") : null);
+  const candidates = [
+    process.env.PYTHON,
+    process.env.PYTHON_EXE,
+    homeDir && path.join(homeDir, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "python.exe"),
+    localAppData && path.join(localAppData, "Programs", "Python", "Python312", "python.exe"),
+    localAppData && path.join(localAppData, "Programs", "Python", "Python311", "python.exe"),
+    "python"
+  ].filter(Boolean);
+  return candidates.find((candidate) => (
+    path.isAbsolute(candidate) ? existsSync(candidate) : true
+  )) || "python";
 }
 
 function runBridge(action, payload) {
@@ -67,12 +81,13 @@ function blockedMotionResult(step, reachability, controller) {
 }
 
 export class Mg400ArmController {
-  constructor() {
-    this.simulationController = new SimulationArmController();
+  constructor({ config = null } = {}) {
+    this.config = config;
+    this.simulationController = new SimulationArmController(config || {});
   }
 
   async execute(step) {
-    const config = await readMg400Config();
+    const config = this.config || await readMg400Config();
 
     if (config.mode === "simulation") {
       return this.simulationController.execute(step);

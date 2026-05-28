@@ -19,10 +19,11 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -30,7 +31,11 @@ from rich.panel import Panel
 from .builtin_tools import build_default_registry, set_runtime_context
 from .config import Config
 from .llm_client import AssistantReply, LLMClient, ToolInvocation
-from .prompts import FALLBACK_TOOL_PROTOCOL, SYSTEM_PROMPT_TP_LOCATE
+from .prompts import (
+    CLI_WORKFLOW_MODE_VLM_TEST_APPEND_ZH,
+    FALLBACK_TOOL_PROTOCOL,
+    SYSTEM_PROMPT_TP_LOCATE,
+)
 from .tools import ToolRegistry, ToolResult, normalize_finish_arguments
 from .utils import encode_image_data_url, truncate
 
@@ -82,37 +87,57 @@ class Agent:
     def run(self, question: str,
             inputs: dict[str, Any] | None = None,
             run_name: str | None = None,
-            event_sink: Callable[[str, dict[str, Any]], None] | None = None) -> AgentRun:
+            event_sink: Any | None = None) -> AgentRun:
         """Execute the agent loop for a single task.
 
         `inputs` is a free-form dict. Keys whose value is a path ending in
         a common image extension are auto-attached as images in the first
         user turn; everything else is listed as text context.
         """
+        wf_mode = str(getattr(self.cfg, "workflow_mode", "default") or "default").strip()
+        if not wf_mode:
+            wf_mode = "default"
+        if wf_mode == "vlm_test":
+            os.environ["VLM_AGENT_WORKFLOW_MODE"] = "vlm_test"
+        else:
+            os.environ.pop("VLM_AGENT_WORKFLOW_MODE", None)
+
         run_dir = self._prepare_run_dir(run_name)
-        if event_sink:
-            event_sink("agent.run_dir", {
-                "run_dir": str(run_dir),
-                "workspace": str(self.cfg.workspace_dir),
-                "model": self.cfg.model,
-            })
+        q_eff = self._effective_task_question(question)
+
+        def emit(event_type: str, payload: dict[str, Any]) -> None:
+            if event_sink is None:
+                return
+            try:
+                event_sink(event_type, payload)
+            except Exception:
+                # UI event streaming is best-effort and must not break a run.
+                pass
+
+        emit("agent.run_dir", {
+            "run_dir": str(run_dir),
+            "workspace": str(self.cfg.workspace_dir),
+            "workflow_mode": self.cfg.workflow_mode,
+        })
         self.console.print(Panel.fit(
             f"[bold]model[/bold] = {self.cfg.model}\n"
             f"[bold]workspace[/bold] = {self.cfg.workspace_dir}\n"
+            f"[bold]workflow_mode[/bold] = {self.cfg.workflow_mode}\n"
             f"[bold]run_dir[/bold] = {run_dir}\n"
             f"[bold]tools[/bold] = {', '.join(self.registry.names())}",
             title="VLM Agent starting",
         ))
 
-        messages = self._initial_messages(question, inputs or {})
+        messages = self._initial_messages(q_eff, inputs or {})
         set_runtime_context(
             project_root=Path.cwd(),
             workspace=self.cfg.workspace_dir,
             input_paths={k: v for k, v in (inputs or {}).items() if isinstance(v, str)},
+            workflow_mode=getattr(self.cfg, "workflow_mode", "default"),
         )
         self._log_jsonl(run_dir, "messages.init.jsonl", messages)
 
-        result = AgentRun(task_question=question, run_dir=run_dir)
+        result = AgentRun(task_question=q_eff, run_dir=run_dir)
         tools_schema = self.registry.openai_schema() if self.cfg.use_native_tools else None
         run_exception: BaseException | None = None
 
@@ -120,20 +145,23 @@ class Agent:
             for step_idx in range(self.cfg.max_steps):
                 self._compact_old_inline_images(messages)
                 t0 = time.time()
+                emit("agent.waiting", {
+                    "step": step_idx,
+                    "message_count": len(messages),
+                    "status": "waiting_for_model",
+                })
                 reply = self.client.chat(messages, tools_schema=tools_schema)
                 dt = time.time() - t0
 
                 self._render_assistant(step_idx, reply, dt)
-                if event_sink:
-                    event_sink("agent.assistant", {
-                        "index": step_idx,
-                        "elapsed_sec": dt,
-                        "content": reply.content,
-                        "tool_call_count": len(reply.tool_calls),
-                    })
                 messages.append(reply.raw_message)
 
                 if not reply.tool_calls:
+                    emit("agent.assistant", {
+                        "step": step_idx,
+                        "content": reply.content,
+                        "tool_calls": [],
+                    })
                     result.steps.append(AgentStep(
                         index=step_idx,
                         assistant_content=reply.content,
@@ -189,16 +217,6 @@ class Agent:
                                 final_data=None,
                             )
                     self._render_tool(call, result_obj)
-                    if event_sink:
-                        event_sink("tool.finished", {
-                            "step_index": step_idx,
-                            "id": call.id,
-                            "name": call.name,
-                            "ok": result_obj.ok,
-                            "is_final": result_obj.is_final,
-                            "images": result_obj.images,
-                            "text": truncate(result_obj.text, 2000),
-                        })
                     if self.cfg.use_native_tools:
                         messages.append(self.client.tool_result_message(
                             tool_call_id=call.id,
@@ -226,6 +244,23 @@ class Agent:
                         "is_final": result_obj.is_final,
                     })
                     attached_images.extend(result_obj.images)
+                    emit("agent.step", {
+                        "step": step_idx,
+                        "assistant_content": reply.content,
+                        "tool_call": {
+                            "id": call.id,
+                            "name": call.name,
+                            "arguments": exec_arguments
+                            if isinstance(exec_arguments, dict)
+                            else call.arguments,
+                        },
+                        "tool_result": {
+                            "ok": result_obj.ok,
+                            "text": truncate(result_obj.text, 2000),
+                            "images": result_obj.images,
+                            "is_final": result_obj.is_final,
+                        },
+                    })
                     if result_obj.is_final and final_answer is None:
                         final_answer = result_obj.final_data
 
@@ -235,13 +270,6 @@ class Agent:
                     tool_calls=tool_call_payload,
                     tool_results=tool_result_payload,
                 ))
-                if event_sink:
-                    event_sink("agent.step", {
-                        "index": step_idx,
-                        "assistant_content": reply.content,
-                        "tool_calls": tool_call_payload,
-                        "tool_results": tool_result_payload,
-                    })
 
                 # If any tool produced images, push them in a follow-up user
                 # message so the VLM can look at them next turn.
@@ -277,6 +305,11 @@ class Agent:
                 if final_answer is not None:
                     result.final_answer = final_answer
                     result.stopped_reason = "finish-tool-called"
+                    emit("agent.final", {
+                        "final_answer": final_answer,
+                        "stopped_reason": result.stopped_reason,
+                        "run_dir": str(run_dir),
+                    })
                     break
             else:
                 result.stopped_reason = "max-steps-reached"
@@ -284,6 +317,11 @@ class Agent:
             run_exception = e
             result.stopped_reason = f"exception:{type(e).__name__}"
             result.last_error = str(e)[:8000]
+            emit("agent.failed", {
+                "error": result.last_error,
+                "stopped_reason": result.stopped_reason,
+                "run_dir": str(run_dir),
+            })
         finally:
             self._persist_run(run_dir, result, messages)
             title = "VLM Agent done"
@@ -433,6 +471,13 @@ class Agent:
         # Default optimistic for unknown providers.
         return True
 
+    def _effective_task_question(self, question: str) -> str:
+        """Append mode-specific appendix (e.g. ``--mode vlm_test``) to the YAML task."""
+        text = question.strip()
+        if getattr(self.cfg, "workflow_mode", "default") != "vlm_test":
+            return text
+        return text + "\n\n" + CLI_WORKFLOW_MODE_VLM_TEST_APPEND_ZH
+
     def _initial_messages(self, question: str,
                           inputs: dict[str, Any]) -> list[dict[str, Any]]:
         sys_text = self.system_prompt
@@ -515,19 +560,44 @@ class Agent:
             "when red anchors are weak; same JSON schema."
         )
         text_context_lines.append("")
+        wf_mode_run = getattr(self.cfg, "workflow_mode", "default")
+        part_d_primary = (
+            "- **Default Part D (`STANDARD_WORKFLOW`)** uses **`case12_step02_opencv_ic_align`** "
+            "（两框 OpenCV）："
+            "`run_build_step02_locator_graph` → `run_align_locator_graph_to_board_ic_bbox` "
+            "(OpenCV **实物 IC 红框**) "
+            "→ read **`board_roi_target_px_approx`** from **`case12_board_points_aligned.json`** → "
+            "**`annotate_image`** on **`debug/step02_board_front_anchor.png`** → **`step08_final_tp.png`** "
+            "+ **`step08_result.json`** + **`step03_mapping.json`** with **`mapping_method`** only, then **`finish`**.\n"
+        )
+        if wf_mode_run == "vlm_test":
+            part_d_primary = (
+                "- **This CLI run (`workflow_mode=vlm_test`)** uses **`case12_step02_vlm_ic_align`**: "
+                "see **`vlm_test` appendix inside ## Task above** — `run_build_step02_locator_graph` → "
+                "VLM → **`case12_board_largest_ic_bbox_vlm.json`** → "
+                "**`run_align_locator_graph_to_board_ic_bbox_vlm`** → **`case12_board_points_aligned.json`** "
+                "(**`source`=`vlm_ic_correspondence_isotropic_align`**) → **`step08_*` → `finish`**.\n"
+            )
         text_context_lines.append(
             "## Step4–8 tool mandate (full-flow tasks)\n"
             "- Produce the **`debug/*.png` / `debug/*.json`** artifacts your Task requires; "
             "`progress/step_*.md` notes are **optional** (runtime does not gate `finish` on them).\n"
-            "- **Step4:** must call **`read_text_file`** (step03_mapping.json), **`image_info`** (board), "
+            + part_d_primary +
+            "- **Legacy Part D** (`case10_dual_roi_layout`): **Step4** — **`read_text_file`** "
+            "(step03_mapping.json), **`image_info`** (board), "
             "**`crop_image`** → `debug/step04_roi_crop.png`, **`view_image`** as needed.\n"
-            "- **VLM Path C variant:** Step4 is **`annotate_image`** on `debug/step03_locator_roi.png` "
-            "→ `debug/step04_locator_landmarks.png` (red landmark boxes), then board prior/mapping; "
+            "- **VLM Path C variant:** Step4 is **`annotate_image`** on "
+            "`debug/step03_locator_roi.png` "
+            "→ `debug/step04_locator_landmarks.png` (red landmark boxes), "
+            "then board prior/mapping; "
             "board ROI crop stays `debug/step04_roi_crop.png` after mapping.\n"
-            "- **Step5–7:** must call **`run_candidate_pipeline`** at least once with `roi_bbox`, "
+            "- **Dual-ROI path Step5–7:** must call **`run_candidate_pipeline`** at least "
+            "once with `roi_bbox`, "
             "`prior_board`, and board image path (see Task / SKILL).\n"
-            "- **Step8:** must call **`annotate_image`** on the **full** board → `debug/step08_final_tp.png`, "
-            "write consistent **`debug/step08_result.json`**, then **`finish`** with **`pixel`** [x,y] aligned "
+            "- **Step8:** must call **`annotate_image`** on the **full** board → "
+            "`debug/step08_final_tp.png`, "
+            "write consistent **`debug/step08_result.json`**, then **`finish`** with **`pixel`** [x,y] "
+            "aligned "
             "to that board frame.\n"
             "- Describing a step without the matching tool call is incomplete."
         )
@@ -607,6 +677,400 @@ class Agent:
                 errors.append(f"Could not cross-check finish pixel with step08_result.json: {e}")
         return errors
 
+    def _part_b_assembly_stepb3_qc_errors(self, ws: Path) -> list[str]:
+        """Shared Part B StepB3 gates (assembly largest IC JSON + view gate + mtime order)."""
+        errors: list[str] = []
+        asm_ic_path = self._path_first_existing(
+            [
+                ws / "debug" / "case10_assembly_largest_ic.json",
+                ws / "workspace" / "debug" / "case10_assembly_largest_ic.json",
+            ],
+        )
+        if asm_ic_path is not None:
+            try:
+                asm_ic_obj = json.loads(asm_ic_path.read_text(encoding="utf-8"))
+                qc_b = asm_ic_obj.get("part_b_stepb3_qc")
+                if not isinstance(qc_b, dict):
+                    errors.append(
+                        "case10_assembly_largest_ic.json must include object "
+                        "part_b_stepb3_qc (Part B StepB3 QC gate); see STANDARD_WORKFLOW StepB3."
+                    )
+                else:
+                    fv = qc_b.get("final_verdict")
+                    if fv not in ("QC_PASS", "QC_PASS_WITH_CAVEATS"):
+                        errors.append(
+                            "part_b_stepb3_qc.final_verdict must be QC_PASS or "
+                            "QC_PASS_WITH_CAVEATS after StepB3 (Revise rounds must finish before "
+                            "writing this JSON)."
+                        )
+                    if qc_b.get("viewed_largest_ic_box_png_before_final_json") is not True:
+                        errors.append(
+                            "part_b_stepb3_qc.viewed_largest_ic_box_png_before_final_json "
+                            "must be true: call view_image(debug/case10_assembly_largest_ic_box.png), "
+                            "run the StepB3 checklist, declare QC_PASS or QC_REVISE, and only "
+                            "then write case10_assembly_largest_ic.json."
+                        )
+                    if qc_b.get(
+                        "final_annotate_overwrote_png_immediately_before_json"
+                    ) is not True:
+                        errors.append(
+                            "part_b_stepb3_qc.final_annotate_overwrote_png_immediately_before_json "
+                            "must be true: after the final bbox is fixed (including after QC_REVISE), "
+                            "you must call annotate_image to overwrite "
+                            "debug/case10_assembly_largest_ic_box.png, then write the JSON with the "
+                            "same bbox — do not update JSON without re-exporting the PNG."
+                        )
+                    note = qc_b.get("whole_page_largest_package_checked_zh")
+                    if not isinstance(note, str) or len(note.strip()) < 6:
+                        errors.append(
+                            "part_b_stepb3_qc.whole_page_largest_package_checked_zh must be a "
+                            "short Chinese note that the full-page largest package was verified "
+                            "(not a smaller neighbor IC)."
+                        )
+                    qru = qc_b.get("qc_rounds_used")
+                    try:
+                        qru_n = int(qru)  # JSON may ship small ints only
+                    except (TypeError, ValueError):
+                        qru_n = -1
+                    if isinstance(qru, bool):
+                        qru_n = -1
+                    if qru_n < 2:
+                        errors.append(
+                            "part_b_stepb3_qc.qc_rounds_used must be an integer >= 2 for "
+                            "Part B (assembly drawing): you must run at least one QC_REVISE "
+                            "cycle (revise case10_assembly_vlm_hints.json → StepB2 run_python → "
+                            "re-annotate case10_assembly_largest_ic_box.png → view_image) before "
+                            "final QC_PASS. Part A (board photo) has no such minimum."
+                        )
+            except json.JSONDecodeError as e:
+                errors.append(f"Invalid JSON in case10_assembly_largest_ic.json: {e}")
+            except OSError as e:
+                errors.append(f"Failed to read case10_assembly_largest_ic.json: {e}")
+
+            box_asm = self._path_first_existing(
+                [
+                    ws / "debug" / "case10_assembly_largest_ic_box.png",
+                    ws / "workspace" / "debug" / "case10_assembly_largest_ic_box.png",
+                ],
+            )
+            if box_asm is not None:
+                gate_p = self._path_first_existing(
+                    [
+                        ws / "debug" / "case10_stepb3_viewed_largest_ic_box.json",
+                        ws / "workspace" / "debug" / "case10_stepb3_viewed_largest_ic_box.json",
+                    ],
+                )
+                if gate_p is None:
+                    errors.append(
+                        "Part B StepB3 (tool-enforced): missing "
+                        "`debug/case10_stepb3_viewed_largest_ic_box.json`. "
+                        "After `annotate_image` → `debug/case10_assembly_largest_ic_box.png`, "
+                        "you MUST call `view_image` on that exact PNG (runtime records the gate), "
+                        "then save `case10_assembly_largest_ic.json`. "
+                        "QC_REVISE: re-annotate → re-view → then JSON."
+                    )
+                else:
+                    try:
+                        gobj = json.loads(gate_p.read_text(encoding="utf-8"))
+                        gmt = gobj.get("png_mtime")
+                        bmt = box_asm.stat().st_mtime
+                        if gmt is None or not math.isclose(
+                            float(gmt), float(bmt), rel_tol=0, abs_tol=1e-3
+                        ):
+                            errors.append(
+                                "Part B StepB3 (tool-enforced): "
+                                "`case10_stepb3_viewed_largest_ic_box.json` is stale — "
+                                "it does not match the current on-disk "
+                                "`case10_assembly_largest_ic_box.png`. "
+                                "Call `view_image(debug/case10_assembly_largest_ic_box.png)` "
+                                "again after the latest `annotate_image` (required after QC_REVISE)."
+                            )
+                    except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
+                        errors.append(
+                            "Part B StepB3 (tool-enforced): invalid view gate "
+                            f"`debug/case10_stepb3_viewed_largest_ic_box.json`: {e}"
+                        )
+                    if asm_ic_path is not None:
+                        try:
+                            if asm_ic_path.stat().st_mtime + 0.001 < gate_p.stat().st_mtime:
+                                errors.append(
+                                    "Part B StepB3 (tool-enforced): "
+                                    "`case10_assembly_largest_ic.json` must be saved AFTER "
+                                    "`view_image` on the final red-box PNG (gate newer than JSON)."
+                                )
+                        except OSError:
+                            pass
+        return errors
+
+    @staticmethod
+    def _path_first_existing(paths: list[Path]) -> Path | None:
+        for q in paths:
+            if q.exists():
+                return q
+        return None
+
+    @staticmethod
+    def _infer_case12_mapping_method_from_workspace(ws: Path) -> str | None:
+        """If ``step03_mapping.json`` lacks ``mapping_method``, infer from aligned output."""
+        for rel in (
+            ("debug", "case12_board_points_aligned.json"),
+            ("workspace", "debug", "case12_board_points_aligned.json"),
+        ):
+            p = ws.joinpath(*rel)
+            if not p.is_file():
+                continue
+            try:
+                obj = json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            src = obj.get("source")
+            if src == "opencv_ic_bbox_isotropic_align":
+                return "case12_step02_opencv_ic_align"
+            if src == "vlm_ic_correspondence_isotropic_align":
+                return "case12_step02_vlm_ic_align"
+        return None
+
+    def _validate_skill_contract_case12_opencv_ic_align(self, ws: Path) -> list[str]:
+        """Part D default: case12 locator graph + OpenCV red IC boxes; TP from aligned JSON."""
+        errors: list[str] = []
+        case10_prefix = [
+            "debug/case10_signal_to_tp.json",
+            "debug/case10_target_tp_pdf_search.json",
+            "debug/case10_assembly_drawing.png",
+            "debug/case10_target_tp_work_roi.png",
+            "debug/case10_assembly_drawing_tp_marked.png",
+            "debug/case10_board_landscape.png",
+            "debug/case10_assembly_largest_ic_box.png",
+            "debug/case10_assembly_largest_ic.json",
+            "debug/case10_largest_ic_box.png",
+            "debug/case10_largest_ic.json",
+            "debug/step02_locator_front_anchor.png",
+            "debug/step02_board_front_anchor.png",
+            "debug/board_tp_marked.png",
+        ]
+        case12_tail = [
+            "debug/step03_mapping.json",
+            "debug/case12_step02_locator_graph.json",
+            "debug/case12_step02_locator_graph.png",
+            "debug/case12_board_points_aligned.json",
+            "debug/case12_board_approx_overlay_opencv.png",
+            "debug/step08_final_tp.png",
+            "debug/step08_result.json",
+        ]
+        for rel in case10_prefix + case12_tail:
+            p1 = ws / rel
+            p2 = ws / "workspace" / rel
+            if not (p1.exists() or p2.exists()):
+                errors.append(f"Missing required debug artifact: {rel}")
+
+        aligned_p = self._path_first_existing(
+            [
+                ws / "debug" / "case12_board_points_aligned.json",
+                ws / "workspace" / "debug" / "case12_board_points_aligned.json",
+            ],
+        )
+        if aligned_p is not None:
+            try:
+                al = json.loads(aligned_p.read_text(encoding="utf-8"))
+                if al.get("source") != "opencv_ic_bbox_isotropic_align":
+                    errors.append(
+                        "case12_board_points_aligned.json source must be "
+                        "`opencv_ic_bbox_isotropic_align` for mapping_method "
+                        "`case12_step02_opencv_ic_align`."
+                    )
+                tp = al.get("board_roi_target_px_approx")
+                if not (isinstance(tp, list) and len(tp) == 2):
+                    errors.append(
+                        "case12_board_points_aligned.json missing board_roi_target_px_approx [x,y]."
+                    )
+                else:
+                    step08r = self._path_first_existing(
+                        [
+                            ws / "debug" / "step08_result.json",
+                            ws / "workspace" / "debug" / "step08_result.json",
+                        ],
+                    )
+                    if step08r is not None:
+                        try:
+                            so = json.loads(step08r.read_text(encoding="utf-8"))
+                            sp = so.get("pixel")
+                            if isinstance(sp, list) and len(sp) == 2:
+                                if abs(float(sp[0]) - float(tp[0])) > 1.0 or abs(
+                                    float(sp[1]) - float(tp[1])
+                                ) > 1.0:
+                                    errors.append(
+                                        "step08_result.json pixel must match "
+                                        "case12_board_points_aligned.json "
+                                        "board_roi_target_px_approx (±1px)."
+                                    )
+                        except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
+                            errors.append(f"Invalid step08_result.json: {e}")
+            except (json.JSONDecodeError, OSError) as e:
+                errors.append(f"Invalid case12_board_points_aligned.json: {e}")
+
+        s02b = self._path_first_existing(
+            [
+                ws / "debug" / "step02_board_front_anchor.png",
+                ws / "workspace" / "debug" / "step02_board_front_anchor.png",
+            ],
+        )
+        step08 = self._path_first_existing(
+            [
+                ws / "debug" / "step08_final_tp.png",
+                ws / "workspace" / "debug" / "step08_final_tp.png",
+            ],
+        )
+        if s02b is not None and step08 is not None:
+            try:
+                from PIL import Image
+
+                with Image.open(s02b) as im_b:
+                    wb = im_b.size
+                with Image.open(step08) as im8:
+                    w8 = im8.size
+                if wb != w8:
+                    errors.append(
+                        "step08_final_tp.png must match step02_board_front_anchor.png "
+                        "width×height (full board frame)."
+                    )
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Failed to validate step08 vs board size: {e}")
+
+        errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
+        return errors
+
+    def _validate_skill_contract_case12_vlm_ic_align(self, ws: Path) -> list[str]:
+        """Part D CLI ``vlm_test``: skip Part A board IC PNG; locator graph + VLM IC JSON → aligned."""
+        errors: list[str] = []
+        prefix = [
+            "debug/case10_signal_to_tp.json",
+            "debug/case10_target_tp_pdf_search.json",
+            "debug/case10_assembly_drawing.png",
+            "debug/case10_target_tp_work_roi.png",
+            "debug/case10_assembly_drawing_tp_marked.png",
+            "debug/case10_board_landscape.png",
+            "debug/case10_assembly_largest_ic_box.png",
+            "debug/case10_assembly_largest_ic.json",
+            "debug/step02_locator_front_anchor.png",
+            "debug/step02_board_front_anchor.png",
+        ]
+        tail = [
+            "debug/step03_mapping.json",
+            "debug/case12_step02_locator_graph.json",
+            "debug/case12_step02_locator_graph.png",
+            "debug/case12_board_largest_ic_bbox_vlm.json",
+            "debug/case12_board_points_aligned.json",
+            "debug/case12_board_approx_overlay_opencv.png",
+            "debug/step08_final_tp.png",
+            "debug/step08_result.json",
+        ]
+        for rel in prefix + tail:
+            p1 = ws / rel
+            p2 = ws / "workspace" / rel
+            if not (p1.exists() or p2.exists()):
+                errors.append(f"Missing required debug artifact: {rel}")
+
+        map_p = self._path_first_existing(
+            [
+                ws / "debug" / "step03_mapping.json",
+                ws / "workspace" / "debug" / "step03_mapping.json",
+            ]
+        )
+        if map_p is not None:
+            try:
+                mm = json.loads(map_p.read_text(encoding="utf-8")).get(
+                    "mapping_method"
+                )
+                if mm != "case12_step02_vlm_ic_align":
+                    errors.append(
+                        "step03_mapping.json mapping_method must be "
+                        "`case12_step02_vlm_ic_align` when using this validator."
+                    )
+            except (json.JSONDecodeError, OSError, TypeError) as e:
+                errors.append(f"Invalid step03_mapping.json: {e}")
+
+        aligned_p = self._path_first_existing(
+            [
+                ws / "debug" / "case12_board_points_aligned.json",
+                ws / "workspace" / "debug" / "case12_board_points_aligned.json",
+            ]
+        )
+        if aligned_p is not None:
+            try:
+                al = json.loads(aligned_p.read_text(encoding="utf-8"))
+                if al.get("source") != "vlm_ic_correspondence_isotropic_align":
+                    errors.append(
+                        "case12_board_points_aligned.json source must be "
+                        "`vlm_ic_correspondence_isotropic_align` for "
+                        "`case12_step02_vlm_ic_align`."
+                    )
+                tp = al.get("board_roi_target_px_approx")
+                if not (isinstance(tp, list) and len(tp) == 2):
+                    errors.append(
+                        "case12_board_points_aligned.json missing "
+                        "board_roi_target_px_approx [x,y]."
+                    )
+                else:
+                    step08r = self._path_first_existing(
+                        [
+                            ws / "debug" / "step08_result.json",
+                            ws / "workspace" / "debug" / "step08_result.json",
+                        ]
+                    )
+                    if step08r is not None:
+                        try:
+                            so = json.loads(step08r.read_text(encoding="utf-8"))
+                            sp = so.get("pixel")
+                            if isinstance(sp, list) and len(sp) == 2:
+                                if abs(float(sp[0]) - float(tp[0])) > 1.0 or abs(
+                                    float(sp[1]) - float(tp[1])
+                                ) > 1.0:
+                                    errors.append(
+                                        "step08_result.json pixel must match "
+                                        "case12_board_points_aligned.json "
+                                        "board_roi_target_px_approx (±1px)."
+                                    )
+                        except (
+                            json.JSONDecodeError,
+                            OSError,
+                            TypeError,
+                            ValueError,
+                        ) as e:
+                            errors.append(f"Invalid step08_result.json: {e}")
+            except (json.JSONDecodeError, OSError) as e:
+                errors.append(f"Invalid case12_board_points_aligned.json: {e}")
+
+        s02b = self._path_first_existing(
+            [
+                ws / "debug" / "step02_board_front_anchor.png",
+                ws / "workspace" / "debug" / "step02_board_front_anchor.png",
+            ]
+        )
+        step08 = self._path_first_existing(
+            [
+                ws / "debug" / "step08_final_tp.png",
+                ws / "workspace" / "debug" / "step08_final_tp.png",
+            ]
+        )
+        if s02b is not None and step08 is not None:
+            try:
+                from PIL import Image
+
+                with Image.open(s02b) as im_b:
+                    wb = im_b.size
+                with Image.open(step08) as im8:
+                    w8 = im8.size
+                if wb != w8:
+                    errors.append(
+                        "step08_final_tp.png must match step02_board_front_anchor.png "
+                        "width×height (full board frame)."
+                    )
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Failed to validate step08 vs board size: {e}")
+
+        errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
+        return errors
+
     def _validate_skill_contract(self) -> list[str]:
         """Check required debug artifacts before accepting finish() (no progress/*.md gate)."""
         errors: list[str] = []
@@ -618,6 +1082,29 @@ class Agent:
             ws / "workspace" / "debug" / "step03_mapping.json",
         ]
         mapping_json = next((p for p in mapping_json_candidates if p.exists()), None)
+        mapping_method_early: str | None = None
+        if mapping_json is not None:
+            try:
+                mapping_method_early = json.loads(
+                    mapping_json.read_text(encoding="utf-8")
+                ).get("mapping_method")
+            except Exception:
+                mapping_method_early = None
+        if isinstance(mapping_method_early, str):
+            mapping_method_early = mapping_method_early.strip() or None
+        # When the model writes step03_mapping with only notes / omitting mapping_method,
+        # fall back to aligned JSON produced by case12_graph (avoid legacy Step5–8 gates).
+        if mapping_method_early is None:
+            inferred = self._infer_case12_mapping_method_from_workspace(ws)
+            if inferred:
+                mapping_method_early = inferred
+        if mapping_method_early == "case12_step02_opencv_ic_align":
+            errors.extend(self._validate_skill_contract_case12_opencv_ic_align(ws))
+            return errors
+        if mapping_method_early == "case12_step02_vlm_ic_align":
+            errors.extend(self._validate_skill_contract_case12_vlm_ic_align(ws))
+            return errors
+
         if mapping_json is None:
             errors.append("Missing required mapping artifact: debug/step03_mapping.json")
         else:
@@ -680,6 +1167,7 @@ class Agent:
             "case10_dual_roi_layout",
         )
         mapping_method_case10_layout = mapping_method_tag == "case10_dual_roi_layout"
+        mapping_method_case12_layout = mapping_method_tag == "case12_step02_anchor_match"
 
         def _first_existing(paths: list[Path]) -> Path | None:
             for q in paths:
@@ -800,6 +1288,39 @@ class Agent:
                     required_debug.insert(insert_at, name)
                     insert_at += 1
 
+        if mapping_method_case12_layout:
+            case12_prefix = [
+                "debug/step02_locator_front_anchor.png",
+                "debug/step02_board_front_anchor.png",
+                "debug/case12_step02_locator_graph.json",
+                "debug/case12_step02_locator_graph.png",
+                "debug/case12_board_largest_ic_bbox_vlm.json",
+                "debug/case12_board_points_aligned.json",
+                "debug/case12_board_approx_overlay_opencv.png",
+                "debug/case12_board_points_vlm_refine.json",
+                "debug/case12_board_points_refined.json",
+                "debug/case12_board_approx_overlay.png",
+            ]
+            aligned_case12 = _first_existing(
+                [
+                    ws / "debug" / "case12_board_points_aligned.json",
+                    ws / "workspace" / "debug" / "case12_board_points_aligned.json",
+                ]
+            )
+            if aligned_case12 is not None and aligned_case12.is_file():
+                try:
+                    _al = json.loads(aligned_case12.read_text(encoding="utf-8"))
+                    if _al.get("source") == "opencv_ic_bbox_isotropic_align":
+                        case12_prefix = [
+                            x
+                            for x in case12_prefix
+                            if x != "debug/case12_board_largest_ic_bbox_vlm.json"
+                        ]
+                except Exception:
+                    pass
+            tail = [x for x in required_debug if x not in case12_prefix]
+            required_debug = case12_prefix + tail
+
         for rel in required_debug:
             p1 = ws / rel
             p2 = ws / "workspace" / rel
@@ -807,126 +1328,7 @@ class Agent:
                 errors.append(f"Missing required debug artifact: {rel}")
 
         if mapping_method_case10_layout:
-            asm_ic_path = _first_existing(
-                [
-                    ws / "debug" / "case10_assembly_largest_ic.json",
-                    ws / "workspace" / "debug" / "case10_assembly_largest_ic.json",
-                ]
-            )
-            if asm_ic_path is not None:
-                try:
-                    asm_ic_obj = json.loads(asm_ic_path.read_text(encoding="utf-8"))
-                    qc_b = asm_ic_obj.get("part_b_stepb3_qc")
-                    if not isinstance(qc_b, dict):
-                        errors.append(
-                            "case10_assembly_largest_ic.json must include object "
-                            "part_b_stepb3_qc (Part B StepB3 QC gate); see STANDARD_WORKFLOW StepB3."
-                        )
-                    else:
-                        fv = qc_b.get("final_verdict")
-                        if fv not in ("QC_PASS", "QC_PASS_WITH_CAVEATS"):
-                            errors.append(
-                                "part_b_stepb3_qc.final_verdict must be QC_PASS or "
-                                "QC_PASS_WITH_CAVEATS after StepB3 (Revise rounds must finish before "
-                                "writing this JSON)."
-                            )
-                        if qc_b.get("viewed_largest_ic_box_png_before_final_json") is not True:
-                            errors.append(
-                                "part_b_stepb3_qc.viewed_largest_ic_box_png_before_final_json "
-                                "must be true: call view_image(debug/case10_assembly_largest_ic_box.png), "
-                                "run the StepB3 checklist, declare QC_PASS or QC_REVISE, and only "
-                                "then write case10_assembly_largest_ic.json."
-                            )
-                        if qc_b.get(
-                            "final_annotate_overwrote_png_immediately_before_json"
-                        ) is not True:
-                            errors.append(
-                                "part_b_stepb3_qc.final_annotate_overwrote_png_immediately_before_json "
-                                "must be true: after the final bbox is fixed (including after QC_REVISE), "
-                                "you must call annotate_image to overwrite "
-                                "debug/case10_assembly_largest_ic_box.png, then write the JSON with the "
-                                "same bbox — do not update JSON without re-exporting the PNG."
-                            )
-                        note = qc_b.get("whole_page_largest_package_checked_zh")
-                        if not isinstance(note, str) or len(note.strip()) < 6:
-                            errors.append(
-                                "part_b_stepb3_qc.whole_page_largest_package_checked_zh must be a "
-                                "short Chinese note that the full-page largest package was verified "
-                                "(not a smaller neighbor IC)."
-                            )
-                        qru = qc_b.get("qc_rounds_used")
-                        try:
-                            qru_n = int(qru)  # JSON may ship small ints only
-                        except (TypeError, ValueError):
-                            qru_n = -1
-                        if isinstance(qru, bool):
-                            qru_n = -1
-                        if qru_n < 2:
-                            errors.append(
-                                "part_b_stepb3_qc.qc_rounds_used must be an integer >= 2 for "
-                                "Part B (assembly drawing): you must run at least one QC_REVISE "
-                                "cycle (revise case10_assembly_vlm_hints.json → StepB2 run_python → "
-                                "re-annotate case10_assembly_largest_ic_box.png → view_image) before "
-                                "final QC_PASS. Part A (board photo) has no such minimum."
-                            )
-                except json.JSONDecodeError as e:
-                    errors.append(f"Invalid JSON in case10_assembly_largest_ic.json: {e}")
-                except OSError as e:
-                    errors.append(f"Failed to read case10_assembly_largest_ic.json: {e}")
-
-                box_asm = _first_existing(
-                    [
-                        ws / "debug" / "case10_assembly_largest_ic_box.png",
-                        ws / "workspace" / "debug" / "case10_assembly_largest_ic_box.png",
-                    ]
-                )
-                if box_asm is not None:
-                    gate_p = _first_existing(
-                        [
-                            ws / "debug" / "case10_stepb3_viewed_largest_ic_box.json",
-                            ws / "workspace" / "debug" / "case10_stepb3_viewed_largest_ic_box.json",
-                        ]
-                    )
-                    if gate_p is None:
-                        errors.append(
-                            "Part B StepB3 (tool-enforced): missing "
-                            "`debug/case10_stepb3_viewed_largest_ic_box.json`. "
-                            "After `annotate_image` → `debug/case10_assembly_largest_ic_box.png`, "
-                            "you MUST call `view_image` on that exact PNG (runtime records the gate), "
-                            "then save `case10_assembly_largest_ic.json`. "
-                            "QC_REVISE: re-annotate → re-view → then JSON."
-                        )
-                    else:
-                        try:
-                            gobj = json.loads(gate_p.read_text(encoding="utf-8"))
-                            gmt = gobj.get("png_mtime")
-                            bmt = box_asm.stat().st_mtime
-                            if gmt is None or not math.isclose(
-                                float(gmt), float(bmt), rel_tol=0, abs_tol=1e-3
-                            ):
-                                errors.append(
-                                    "Part B StepB3 (tool-enforced): "
-                                    "`case10_stepb3_viewed_largest_ic_box.json` is stale — "
-                                    "it does not match the current on-disk "
-                                    "`case10_assembly_largest_ic_box.png`. "
-                                    "Call `view_image(debug/case10_assembly_largest_ic_box.png)` "
-                                    "again after the latest `annotate_image` (required after QC_REVISE)."
-                                )
-                        except (json.JSONDecodeError, OSError, TypeError, ValueError) as e:
-                            errors.append(
-                                "Part B StepB3 (tool-enforced): invalid view gate "
-                                f"`debug/case10_stepb3_viewed_largest_ic_box.json`: {e}"
-                            )
-                        if asm_ic_path is not None:
-                            try:
-                                if asm_ic_path.stat().st_mtime + 0.001 < gate_p.stat().st_mtime:
-                                    errors.append(
-                                        "Part B StepB3 (tool-enforced): "
-                                        "`case10_assembly_largest_ic.json` must be saved AFTER "
-                                        "`view_image` on the final red-box PNG (gate newer than JSON)."
-                                    )
-                            except OSError:
-                                pass
+            errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
 
         # Step8 final image must be on full board, not ROI-sized crop.
         step08 = next((p for p in [ws / "debug" / "step08_final_tp.png",

@@ -16,13 +16,21 @@ This repository contains a PCBA debugging bench prototype that connects user inp
 ```text
 User instruction / uploaded case data
   -> Inputdemo HTTP API and web UI
-  -> input parser and task planner
+  -> input parser and VLM target execution mapper
   -> VLM task YAML generation
   -> Debugging-agent-v2 visual reasoning
   -> pixel target / confidence result
   -> MG400 real or simulation execution adapter
   -> run status, report, and UI feedback
 ```
+
+## Current Version Notes
+
+The current version workflow, known unfinished items, service commands, ports, and the generated architecture flow diagram are documented in:
+
+- [`docs/current-version-flow.md`](docs/current-version-flow.md)
+
+Current integrated branch: `codex/vlm-prompt-inputs`. The repository `master` branch is kept as an older baseline.
 
 ## Requirements
 
@@ -75,6 +83,17 @@ npm start
 ```
 
 The service starts on `http://localhost:3000` by default.
+
+Robot and simulation commands are now routed through a TCP/IP gateway service.
+Start it in a second terminal before running hardware or simulation actions:
+
+```bash
+npm run robot-gateway
+```
+
+The Node orchestrator calls the gateway with HTTP/JSON over TCP/IP at
+`ROBOT_GATEWAY_URL` (`http://127.0.0.1:8010` by default). The gateway then
+connects to the real MG400 TCP ports or to the simulation Dashboard TCP port.
 
 Available entry points:
 

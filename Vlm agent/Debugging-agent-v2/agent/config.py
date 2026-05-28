@@ -23,6 +23,8 @@ class Config:
     max_tokens: int = 2048
     max_steps: int = 80
     workspace_dir: Path = field(default_factory=lambda: Path("workspace"))
+    # `default` = STANDARD_WORKFLOW Part D OpenCV 两框对齐；`vlm_test` = CLI 实验：跳过 Part A 实物 IC 红框，纯 VLM case12 对应。
+    workflow_mode: str = "default"
 
     # --- HTTP / resilience (OpenAI SDK → httpx) ---------------------- #
     # Longer timeouts help multimodal payloads; retries help transient
@@ -113,6 +115,11 @@ def load_config(env_path: str | os.PathLike[str] | None = None,
     reasoning_effort = (str(reasoning_effort).strip() or None) if reasoning_effort else None
     thinking_mode = _as_optional_bool(pick("VLM_THINKING_MODE"))
 
+    wf_mode = overrides.get("workflow_mode")
+    if wf_mode is None:
+        wf_mode = pick("VLM_AGENT_WORKFLOW_MODE", "default")
+    wf_mode = str(wf_mode).strip() or "default"
+
     return Config(
         base_url=str(base_url),
         api_key=str(api_key),
@@ -120,8 +127,9 @@ def load_config(env_path: str | os.PathLike[str] | None = None,
         use_native_tools=_as_bool(pick("VLM_USE_NATIVE_TOOLS"), True),
         temperature=float(pick("VLM_TEMPERATURE", 0.2)),
         max_tokens=int(pick("VLM_MAX_TOKENS", 2048)),
-        max_steps=int(overrides.get("max_steps", 80)),
+        max_steps=int(overrides.get("max_steps", pick("VLM_AGENT_MAX_STEPS", 80))),
         workspace_dir=Path(overrides.get("workspace_dir", "workspace")),
+        workflow_mode=wf_mode,
         enable_thinking=_as_bool(pick("VLM_ENABLE_THINKING"), False),
         reasoning_effort=reasoning_effort,
         thinking_mode=thinking_mode,

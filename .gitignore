@@ -20,6 +20,9 @@ MG400stimulation/MG400simulation-git-latest-ghproxy/
 **/workspace/runs/
 **/workspace/debug/
 **/workspace/workspace/
+**/workspace/vlm-agent-runs/
+Vlm agent/Debugging-agent-v2/workspace/
+Vlm agent/Debugging-agent-v2/data/cases/case-*/
 **/__pycache__/
 **/.pytest_cache/
 **/.pytest_tmp/

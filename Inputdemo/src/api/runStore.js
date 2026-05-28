@@ -31,3 +31,9 @@ export function appendRunEvent(runId, type, payload = {}) {
   run.nodeEvents.push(event);
   return event;
 }
+
+export function getRunEvents(runId, since = 0) {
+  const run = getRun(runId);
+  if (!run) return null;
+  return (run.nodeEvents || []).filter((event) => Number(event.seq) > Number(since || 0));
+}

@@ -1,9 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { buildVlmAgentTaskYaml } from "../agent/vlmAgentTaskYaml.js";
+import { defaultVlmAgentCasesDir } from "./defaultPaths.js";
 
 export class VlmAgentCaseAdapter {
-  constructor({ outputDir = path.join(process.cwd(), "output", "vlm-agent-cases") } = {}) {
+  constructor({ outputDir = defaultVlmAgentCasesDir() } = {}) {
     this.outputDir = outputDir;
   }
 

@@ -1,8 +1,6 @@
 import { AgentState, StepKind } from "../domain/states.js";
 import { createBenchRun, transition } from "../domain/run.js";
-import { writeModelInputYamlFile } from "../adapters/modelInputYamlFileWriter.js";
-import { buildModelInputYaml } from "./modelInputYaml.js";
-import { buildPlan } from "./planner.js";
+import { mapVlmTargetToExecution } from "./vlmTargetExecutionMapper.js";
 
 export class BenchAgent {
   constructor({ vlmClient, largeModelClient, ragRepository, armController, equipmentController, reportGenerator, vlmAgentCaseAdapter = null }) {
@@ -18,12 +16,7 @@ export class BenchAgent {
   async run(input) {
     const run = createBenchRun(input);
 
-    transition(run, AgentState.PREPARING, "Parsed 6-field input; building YAML and running model/VLM without RAG.");
-    run.modelInputYaml = buildModelInputYaml(input);
-    run.modelInputYamlFile = await writeModelInputYamlFile({
-      runId: run.runId,
-      yaml: run.modelInputYaml
-    });
+    transition(run, AgentState.PREPARING, "Parsed 6-field input; building Debugging-agent-v2 task and running VLM without RAG.");
     if (this.vlmAgentCaseAdapter) {
       run.vlmAgentCase = await this.vlmAgentCaseAdapter.adapt({
         runId: run.runId,
@@ -35,7 +28,6 @@ export class BenchAgent {
       this.vlmClient.analyzeBench({ input, vlmAgentCase: run.vlmAgentCase }),
       this.largeModelClient.generateMg400Pose({
         input,
-        yaml: run.modelInputYaml,
         vlmAgentCase: run.vlmAgentCase
       })
     ]);
@@ -43,9 +35,9 @@ export class BenchAgent {
     run.ragEvidence = ragEvidence;
     run.vlmObservation = vlmObservation;
     run.modelOutput = modelOutput;
-    run.plan = buildPlan({ input, ragEvidence, vlmObservation, modelOutput });
+    run.plan = mapVlmTargetToExecution({ input, ragEvidence, vlmObservation, modelOutput });
 
-    transition(run, AgentState.EXECUTING, "Plan generated; executing hardware flow.");
+    transition(run, AgentState.EXECUTING, "VLM target execution mapping created; executing hardware flow.");
     const blockedLocations = new Map();
     for (const step of run.plan.steps) {
       if (step.kind === StepKind.ARM_MOTION || step.kind === StepKind.VISUAL_CAPTURE) {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
@@ -561,6 +562,328 @@ def test_compute_locator_to_board_scale_no_scale():
     print("OK  compute_locator_to_board_scale_no_scale")
 
 
+def test_build_pairwise_roi_includes_ref_ic_order():
+    from case10_dual_roi_refine import build_pairwise_roi
+
+    centers = {
+        "tp": (10.0, 10.0),
+        "ref_ic": (100.0, 10.0),
+        "ref_1": (10.0, 80.0),
+    }
+    p = build_pairwise_roi(centers)
+    nodes_in_edges = set()
+    for e in p:
+        nodes_in_edges.add(e["a"])
+        nodes_in_edges.add(e["b"])
+    assert nodes_in_edges == {"tp", "ref_ic", "ref_1"}
+    assert len(p) == 3  # C(3,2)
+    print("OK  build_pairwise_roi_includes_ref_ic_order")
+
+
+def test_case12_ic_bbox_isotropic_preserves_interpoint_ratios():
+    from case12_step02_graph import _fit_isotropic_scale_translate_ic_boxes
+
+    bbox_l = (100, 80, 200, 160)  # 100 x 80
+    bbox_b = (300, 200, 500, 360)  # 200 x 160 => s_w=s_h=2, perfect
+    s, tx, ty, meta = _fit_isotropic_scale_translate_ic_boxes(bbox_l, bbox_b)
+    assert abs(s - 2.0) < 1e-6
+    assert abs(tx - 100.0) < 1e-3 and abs(ty - 40.0) < 1e-3
+    assert meta["ic_corner_residual_max_px"] < 0.02
+
+    p1 = (10.0, 20.0)
+    p2 = (40.0, 50.0)
+    d_before = ((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2) ** 0.5
+    q1 = (s * p1[0] + tx, s * p1[1] + ty)
+    q2 = (s * p2[0] + tx, s * p2[1] + ty)
+    d_after = ((q2[0] - q1[0]) ** 2 + (q2[1] - q1[1]) ** 2) ** 0.5
+    assert abs(d_after - s * d_before) < 1e-6
+    print("OK  case12_ic_bbox_isotropic_preserves_interpoint_ratios")
+
+
+def test_parse_vlm_board_largest_ic_bbox():
+    from case12_step02_graph import _parse_vlm_board_largest_ic_bbox
+
+    bb = _parse_vlm_board_largest_ic_bbox(
+        {"board_largest_ic_bbox_xyxy": [10, 20, 100, 200]},
+        (512, 384),
+    )
+    assert bb == (10, 20, 100, 200)
+    bb2 = _parse_vlm_board_largest_ic_bbox(
+        {"bbox_board_ic_xyxy": [500, 400, 10, 5]},
+        (512, 384),
+    )
+    assert bb2[0] < bb2[2] and bb2[1] < bb2[3]
+    print("OK  parse_vlm_board_largest_ic_bbox")
+
+
+def test_case12_vlm_correspondence_explicit_s():
+    from case12_step02_graph import _compute_st_from_vlm_ic_correspondence
+
+    bbox_loc = (100, 100, 200, 150)
+    ref_ic_loc = (150.0, 125.0)
+    obj = {
+        "ref_ic_center_board_px": [300.0, 250.0],
+        "isotropic_scale_locator_to_board": 2.0,
+    }
+    s, tx, ty, meta, bb = _compute_st_from_vlm_ic_correspondence(obj, (400, 300), bbox_loc, ref_ic_loc)
+    assert abs(s - 2.0) < 1e-6
+    assert abs(tx - 0.0) < 1e-6
+    assert abs(ty - 0.0) < 1e-6
+    assert bb is None
+    assert meta["align_mode"] == "vlm_ref_ic_center_explicit_s"
+    print("OK  case12_vlm_correspondence_explicit_s")
+
+
+def test_case12_vlm_correspondence_bbox_derives_s():
+    from case12_step02_graph import _compute_st_from_vlm_ic_correspondence
+
+    bbox_loc = (0, 0, 100, 100)
+    ref_ic_loc = (50.0, 50.0)
+    obj = {
+        "ref_ic_center_board_px": [150.0, 110.0],
+        "board_largest_ic_bbox_xyxy": [100, 80, 200, 140],
+    }
+    s, tx, ty, meta, bb = _compute_st_from_vlm_ic_correspondence(obj, (500, 400), bbox_loc, ref_ic_loc)
+    assert abs(s - 0.8) < 1e-5
+    assert abs((s * ref_ic_loc[0] + tx) - 150.0) < 1e-3
+    assert abs((s * ref_ic_loc[1] + ty) - 110.0) < 1e-3
+    assert meta["align_mode"] == "vlm_ref_ic_center_bbox_derived_s"
+    assert bb is not None
+    print("OK  case12_vlm_correspondence_bbox_derives_s")
+
+
+def test_case12_refinement_validates_small_nudge():
+    from case12_step02_graph import validate_refinement_against_base
+
+    base = {"tp": (100.0, 100.0), "ref_ic": (200.0, 100.0), "ref_1": (100.0, 200.0)}
+    refined = {"tp": (102.0, 99.0), "ref_ic": (201.0, 101.0), "ref_1": (99.0, 201.0)}
+    stats = validate_refinement_against_base(
+        base, refined, max_delta_px=10.0, max_relative_pairwise_dist_change=0.15
+    )
+    assert stats["max_delta_px"] <= 10.0
+    print("OK  case12_refinement_validates_small_nudge")
+
+
+def test_case12_refinement_rejects_large_delta():
+    from case12_step02_graph import validate_refinement_against_base
+
+    base = {"tp": (0.0, 0.0), "ref_ic": (10.0, 0.0)}
+    refined = {"tp": (50.0, 0.0), "ref_ic": (10.0, 0.0)}
+    try:
+        validate_refinement_against_base(
+            base, refined, max_delta_px=5.0, max_relative_pairwise_dist_change=None
+        )
+    except ValueError as e:
+        assert "max_delta_px" in str(e)
+        print("OK  case12_refinement_rejects_large_delta")
+        return
+    raise AssertionError("expected ValueError")
+
+
+def test_case12_refinement_rejects_topology_stretch():
+    from case12_step02_graph import validate_refinement_against_base
+
+    base = {"tp": (0.0, 0.0), "ref_ic": (100.0, 0.0), "ref_1": (0.0, 100.0)}
+    refined = {"tp": (0.0, 0.0), "ref_ic": (130.0, 0.0), "ref_1": (0.0, 100.0)}
+    try:
+        validate_refinement_against_base(
+            base, refined, max_delta_px=50.0, max_relative_pairwise_dist_change=0.12
+        )
+    except ValueError as e:
+        assert "relative dist change" in str(e) or "pair" in str(e)
+        print("OK  case12_refinement_rejects_topology_stretch")
+        return
+    raise AssertionError("expected ValueError")
+
+
+def test_detect_green_tp_center_hsv_ring():
+    import cv2
+    import numpy as np
+    from case10_dual_roi_refine import _detect_green_tp_center
+
+    img = np.full((400, 400, 3), 255, dtype=np.uint8)
+    cv2.circle(img, (200, 180), 14, (0, 255, 0), 2)
+    cv2.circle(img, (200, 180), 8, (255, 255, 255), -1)
+    tp = _detect_green_tp_center(img)
+    assert tp is not None
+    cx, cy, rad = tp
+    assert abs(cx - 200) < 15 and abs(cy - 180) < 15
+    assert rad >= 4
+    print("OK  detect_green_tp_center_hsv_ring")
+
+
+def test_detect_green_tp_on_workspace_locator_if_present():
+    from pathlib import Path
+
+    p = Path("workspace/debug/step02_locator_front_anchor.png")
+    if not p.is_file():
+        print("SKIP  detect_green_tp_on_workspace_locator_if_present (no png)")
+        return
+    import cv2
+    from case10_dual_roi_refine import _detect_green_tp_center
+
+    bgr = cv2.imread(str(p))
+    tp = _detect_green_tp_center(bgr)
+    assert tp is not None, "green TP must be detected on step02_locator_front_anchor"
+    print(f"OK  detect_green_tp_on_workspace_locator tp={tp}")
+
+
+def test_vlm_test_blocks_case12_legacy_align_env():
+    from case12_step02_graph import run_align_locator_graph_to_board_ic_bbox
+
+    prev = os.environ.get("VLM_AGENT_WORKFLOW_MODE")
+    os.environ["VLM_AGENT_WORKFLOW_MODE"] = "vlm_test"
+    try:
+        try:
+            run_align_locator_graph_to_board_ic_bbox(workspace="__no_such__/ws")
+        except RuntimeError as e:
+            assert "vlm_test" in str(e).replace(" ", "").lower() or "forbidden" in str(
+                e
+            ).lower()
+            print("OK  vlm_test_blocks_case12_legacy_align_env")
+            return
+        raise AssertionError("expected RuntimeError from vlm_test guard")
+    finally:
+        if prev is None:
+            os.environ.pop("VLM_AGENT_WORKFLOW_MODE", None)
+        else:
+            os.environ["VLM_AGENT_WORKFLOW_MODE"] = prev
+
+
+def test_vlm_test_run_python_regex_allows_only_vlm_symbol():
+    from agent.builtin_tools import build_default_registry, set_runtime_context
+
+    root = _HERE.parent
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        reg = build_default_registry(ws)
+        set_runtime_context(root, ws, {}, workflow_mode="vlm_test")
+        r = reg.run(
+            "run_python",
+            {"code": "pass\n# run_align_locator_graph_to_board_ic_bbox()\n"},
+        )
+        assert r.ok is False
+        assert "vlm_test-guard" in (r.text or "")
+
+        r_ok = reg.run(
+            "run_python",
+            {
+                "code": (
+                    "run_align_locator_graph_to_board_ic_bbox_vlm = lambda: None\n"
+                    "del run_align_locator_graph_to_board_ic_bbox_vlm\n"
+                ),
+            },
+        )
+        assert r_ok.ok is True
+
+        rs = reg.run(
+            "save_text_file",
+            {"path": "debug/case10_largest_ic.json", "content": "{}"},
+        )
+        assert rs.ok is False
+        assert "vlm_test-guard" in (rs.text or "")
+    set_runtime_context(root, root / "workspace", {}, workflow_mode="default")
+
+
+def test_vlm_test_run_python_physical_board_geometry_guard():
+    from agent.builtin_tools import build_default_registry, set_runtime_context
+    from PIL import Image
+
+    root = _HERE.parent
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        dbg = ws / "debug"
+        dbg.mkdir(parents=True)
+        Image.new("RGB", (32, 24)).save(dbg / "case10_board_landscape.png")
+        reg = build_default_registry(ws)
+        set_runtime_context(root, ws, {}, workflow_mode="vlm_test")
+
+        benign = """import cv2
+img = cv2.imread("debug/case10_board_landscape.png")
+print(img.shape)
+"""
+        r_ok = reg.run("run_python", {"code": benign})
+        assert r_ok.ok is True
+
+        bad_rect = benign + '\ncv2.rectangle(img, (0,0), (10,10), (0,0,255), 3)\n'
+        r_bad = reg.run("run_python", {"code": bad_rect})
+        assert r_bad.ok is False
+        assert "classic CV" in (r_bad.text or "") or "vlm_test-guard" in (r_bad.text or "")
+
+        contours = benign + '\ncv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)\n'
+        r_cnt = reg.run("run_python", {"code": contours})
+        assert r_cnt.ok is False
+
+    set_runtime_context(root, root / "workspace", {}, workflow_mode="default")
+
+
+def test_vlm_test_annotate_physical_board_bbox_forbidden_circle_ok():
+    from agent.builtin_tools import build_default_registry, set_runtime_context
+    from PIL import Image
+
+    root = _HERE.parent
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        dbg = ws / "debug"
+        dbg.mkdir(parents=True)
+        Image.new("RGB", (320, 240)).save(dbg / "case10_board_landscape.png")
+        reg = build_default_registry(ws)
+        set_runtime_context(root, ws, {}, workflow_mode="vlm_test")
+
+        bbox_res = reg.run(
+            "annotate_image",
+            {
+                "path": "debug/case10_board_landscape.png",
+                "points": [{"bbox": [12, 12, 40, 40], "color": "red"}],
+                "out_path": "debug/_tmp_physical_board_bbox.png",
+            },
+        )
+        assert bbox_res.ok is False
+        assert "bbox" in (bbox_res.text or "").lower()
+
+        circle_res = reg.run(
+            "annotate_image",
+            {
+                "path": "debug/case10_board_landscape.png",
+                "points": [{"x": 160, "y": 120, "color": "blue", "radius": 8}],
+                "out_path": "debug/_tmp_physical_board_dot.png",
+            },
+        )
+        assert circle_res.ok is True
+
+    set_runtime_context(root, root / "workspace", {}, workflow_mode="default")
+
+
+def test_run_python_open_defaults_to_utf8_for_json():
+    from agent.builtin_tools import build_default_registry, set_runtime_context
+
+    root = _HERE.parent
+    with tempfile.TemporaryDirectory() as td:
+        ws = Path(td)
+        dbg = ws / "debug"
+        dbg.mkdir(parents=True)
+        (dbg / "sample.json").write_text(
+            '{"message": "已对照整页：红框为最大QFP封装"}',
+            encoding="utf-8",
+        )
+        reg = build_default_registry(ws)
+        set_runtime_context(root, ws, {}, workflow_mode="default")
+        r = reg.run(
+            "run_python",
+            {
+                "code": (
+                    "import json\n"
+                    "data = json.load(open('debug/sample.json'))\n"
+                    "print(data['message'])\n"
+                ),
+            },
+        )
+        assert r.ok is True, r.text
+        assert "最大QFP封装" in (r.text or "")
+
+    set_runtime_context(root, root / "workspace", {}, workflow_mode="default")
+
+
 def main() -> int:
     test_missing_env_raises()
     test_tool_registry_openai_schema()
@@ -577,6 +900,21 @@ def main() -> int:
     test_compute_locator_to_board_scale_ref_ref_median()
     test_compute_locator_to_board_scale_tp_ref_fallback()
     test_compute_locator_to_board_scale_no_scale()
+    test_build_pairwise_roi_includes_ref_ic_order()
+    test_case12_ic_bbox_isotropic_preserves_interpoint_ratios()
+    test_parse_vlm_board_largest_ic_bbox()
+    test_case12_vlm_correspondence_explicit_s()
+    test_case12_vlm_correspondence_bbox_derives_s()
+    test_case12_refinement_validates_small_nudge()
+    test_case12_refinement_rejects_large_delta()
+    test_case12_refinement_rejects_topology_stretch()
+    test_detect_green_tp_center_hsv_ring()
+    test_detect_green_tp_on_workspace_locator_if_present()
+    test_vlm_test_blocks_case12_legacy_align_env()
+    test_vlm_test_run_python_regex_allows_only_vlm_symbol()
+    test_vlm_test_run_python_physical_board_geometry_guard()
+    test_vlm_test_annotate_physical_board_bbox_forbidden_circle_ok()
+    test_run_python_open_defaults_to_utf8_for_json()
     print("\nALL UNIT TESTS PASSED")
     return 0
 

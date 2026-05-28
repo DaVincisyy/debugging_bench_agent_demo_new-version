@@ -1,13 +1,9 @@
-"""HTTP service wrapper for the VLM agent.
-
-This keeps the existing CLI and Agent core intact while exposing a long-running
-FastAPI process that Node.js can talk to over a structured protocol.
-"""
+"""HTTP service wrapper for the VLM agent."""
 
 from __future__ import annotations
 
-import json
 import asyncio
+import json
 import threading
 import time
 import uuid
@@ -148,9 +144,7 @@ class RunManager:
             self._append_event(run, "agent.started", {"task_file": req.task_file})
 
         try:
-            overrides: dict[str, Any] = {
-                "workspace_dir": Path(req.workspace),
-            }
+            overrides: dict[str, Any] = {"workspace_dir": Path(req.workspace)}
             if req.max_steps is not None:
                 overrides["max_steps"] = req.max_steps
             if req.model:
@@ -167,7 +161,9 @@ class RunManager:
                 question=compose_agent_question(task),
                 inputs=task.get("inputs", {}),
                 run_name=req.name or Path(req.task_file).stem,
-                event_sink=lambda event_type, payload: self._append_event_threadsafe(run_id, event_type, payload),
+                event_sink=lambda event_type, payload: self._append_event_threadsafe(
+                    run_id, event_type, payload
+                ),
             )
             summary_path = result.run_dir / "summary.json" if result.run_dir else None
             with self._lock:

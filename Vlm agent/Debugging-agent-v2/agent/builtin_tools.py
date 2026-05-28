@@ -41,6 +41,7 @@ from .utils import truncate
 _RUNTIME_PROJECT_ROOT = Path.cwd().resolve()
 _RUNTIME_WORKSPACE = (_RUNTIME_PROJECT_ROOT / "workspace").resolve()
 _RUNTIME_INPUT_PATHS: dict[str, str] = {}
+_RUNTIME_WORKFLOW_MODE: str = "default"
 
 
 # Part B StepB3 — prove `view_image` ran on the current on-disk red-box PNG
@@ -83,12 +84,100 @@ def _stepb3_record_view_gate(workspace: Path, png_resolved: Path) -> None:
 
 def set_runtime_context(project_root: Path,
                         workspace: Path,
-                        input_paths: dict[str, str] | None = None) -> None:
+                        input_paths: dict[str, str] | None = None,
+                        workflow_mode: str | None = None) -> None:
     """Called by Agent at run start so tools share the same path context."""
     global _RUNTIME_PROJECT_ROOT, _RUNTIME_WORKSPACE, _RUNTIME_INPUT_PATHS
+    global _RUNTIME_WORKFLOW_MODE
     _RUNTIME_PROJECT_ROOT = project_root.resolve()
     _RUNTIME_WORKSPACE = workspace.resolve()
     _RUNTIME_INPUT_PATHS = dict(input_paths or {})
+    _RUNTIME_WORKFLOW_MODE = (workflow_mode or "default").strip() or "default"
+
+
+def _is_vlm_test_workflow_mode() -> bool:
+    return _RUNTIME_WORKFLOW_MODE.strip() == "vlm_test"
+
+
+def _annotate_source_smells_physical_board_workflow(norm_lower: str) -> bool:
+    """Workspace-relative paths tied to normalized **physical** board raster (Part A baseline)."""
+    return (
+        "case10_board_landscape" in norm_lower
+        or "step02_board_front_anchor" in norm_lower
+    )
+
+
+def _python_snippet_hints_physical_board_raster(norm_lower_snippet: str) -> bool:
+    """Heuristic: snippet references normalized physical-board files or front camera path keys."""
+    return bool(
+        re.search(
+            r"case10_board_landscape|step02_board_front_anchor|front_board_photo",
+            norm_lower_snippet,
+            flags=re.I,
+        )
+        or (
+            ("input_paths" in norm_lower_snippet or "INPUT_PATHS" in norm_lower_snippet)
+            and "front_board" in norm_lower_snippet
+        )
+    )
+
+
+def _vlm_test_run_python_guard_physical_board_ic_geometry(code: str) -> ToolResult | None:
+    """Forbid CV-based IC localization overlays on physical-board anchors (vlm_test)."""
+    if not _is_vlm_test_workflow_mode():
+        return None
+    compact = " ".join(code.replace("\\", "/").lower().split())
+    if not _python_snippet_hints_physical_board_raster(compact):
+        return None
+
+    reasons: list[str] = []
+
+    # Drawing chip-scale boxes onto the cleaned board photo defeats VLM correspondence.
+    if re.search(r"\bcv2\s*\.\s*rectangle\s*\(", compact):
+        reasons.append("`cv2.rectangle`")
+
+    contourish = (
+        r"\bcv2\s*\.\s*(?:findcontours|connectedcomponents\b|connectedcomponentswithstats|canny\b|"
+        r"watershed\b|grabcut\b)"
+    )
+    if re.search(contourish, compact):
+        reasons.append("`cv2` contour/segmentation (`findContours`/connectedComponents/Canny/...)")
+
+    if re.search(r"\bcv2\s*\.\s*inrange\s*\(", compact):
+        reasons.append("`cv2.inRange`")
+
+    if re.search(
+        r"cvtcolor\s*\([^)]*color_bgr2hsv|\bcolor_bgr2hsv\b|\bcolour_bgr2hsv\b|\bBGR2HSV\b",
+        compact,
+        flags=re.I,
+    ):
+        reasons.append("HSV color conversion targeting masks")
+
+    if re.search(
+        r"\bcv2\s*\.\s*(?:boundingrect|minarearect|moments|contourarea|arclength|"
+        r"minenclosingcircle|fitellipse|approxpolydp)\s*\(",
+        compact,
+    ):
+        reasons.append("`cv2` contour metrics (`boundingRect`/`moments`/...)")
+
+    if re.search(r"\bdraw\s*\.\s*rectangle\s*\(", compact):
+        reasons.append("PIL `.draw.rectangle` chip overlays")
+
+    if not reasons:
+        return None
+
+    joined = "; ".join(sorted(set(reasons)))
+    return ToolResult(
+        text=(
+            "[vlm_test-guard] Do **not** use classical CV (or scripted box drawing on pixels) "
+            "on **`case10_board_landscape`** / **`step02_board_front_anchor`** / **`front_board_photo`** "
+            f"to **localize or mark the IC** before Part D correspondence. Blocked for {joined}. "
+            "Instead: **`view_image`** → **`save_text_file` → `debug/case12_board_largest_ic_bbox_vlm.json`** "
+            "→ **`run_align_locator_graph_to_board_ic_bbox_vlm`** "
+            "(numbers must come from **multimodal visual reasoning**, not OpenCV)."
+        ),
+        ok=False,
+    )
 
 
 def _resolve_read(path: str) -> Path:
@@ -532,6 +621,15 @@ def _tool_search_pdf_text(workspace: Path,
 
 def _tool_save_text_file(workspace: Path, path: str, content: str) -> ToolResult:
     p = _resolve_write(workspace, path)
+    if _is_vlm_test_workflow_mode() and p.name.lower() == "case10_largest_ic.json":
+        return ToolResult(
+            text=(
+                "[vlm_test-guard] `case10_largest_ic.json` is forbidden in `workflow_mode=vlm_test` "
+                "(Part A board IC annotate/OpenCV artifacts are skipped). "
+                "Do not write Part A locator-style IC JSON."
+            ),
+            ok=False,
+        )
     if p.name == "step03_mapping.json" and "vlm_neighborhood_layout_match" in content:
         blocked = _check_step3b_written(workspace)
         if blocked is not None:
@@ -1057,6 +1155,33 @@ def _tool_annotate_image(workspace: Path, path: str,
     """
     p = _resolve_read(path)
     out = _resolve_write(workspace, out_path)
+    if _is_vlm_test_workflow_mode() and out.name.lower() == "case10_largest_ic_box.png":
+        return ToolResult(
+            text=(
+                "[vlm_test-guard] Annotating/writing **`case10_largest_ic_box.png`** is forbidden "
+                "when `workflow_mode=vlm_test` (no Part A red IC box on the physical photo). "
+                "Use **`case10_board_landscape.png`** normalization only; **`step02_board_front_anchor.png`** "
+                "must be a copy of **`case10_board_landscape.png`**."
+            ),
+            ok=False,
+        )
+    norm_phys_src = str(p.resolve()).replace("\\", "/").lower()
+    if _is_vlm_test_workflow_mode() and _annotate_source_smells_physical_board_workflow(
+        norm_phys_src
+    ):
+        for pt in points:
+            bb = pt.get("bbox")
+            if isinstance(bb, (list, tuple)) and len(bb) == 4:
+                return ToolResult(
+                    text=(
+                        "[vlm_test-guard] `annotate_image` must **not** draw **`bbox`** rectangles "
+                        "on **`case10_board_landscape.png`** / **`step02_board_front_anchor.png`** "
+                        "(scripted IC localization). TP Step8 overlays use **`{x,y,color,radius,...}` "
+                        "** dots only.**"
+                    ),
+                    ok=False,
+                )
+
     norm_out = str(out).replace("\\", "/").lower()
     if "step04_locator_landmarks" in norm_out:
         blocked = _check_step3b_written(workspace)
@@ -1101,8 +1226,20 @@ def _tool_annotate_image(workspace: Path, path: str,
         blocked = _check_step4_locator_landmarks_present(workspace)
         if blocked is not None:
             return blocked
-    with Image.open(p) as im:
-        img = im.convert("RGB").copy()
+    # Load raster the same way OpenCV does everywhere else. PIL alone can apply EXIF
+    # orientation so ``Image.open`` pixels disagree with ``cv2.imread`` (90° mismatch).
+    try:
+        import cv2
+        bgr = cv2.imread(str(p))
+        if bgr is not None:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(rgb)
+        else:
+            with Image.open(p) as im:
+                img = im.convert("RGB").copy()
+    except Exception:  # noqa: BLE001
+        with Image.open(p) as im:
+            img = im.convert("RGB").copy()
     iw, ih = img.size
     draw = ImageDraw.Draw(img)
     step04_lm_out = "step04_locator_landmarks" in norm_out
@@ -2068,6 +2205,24 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
             ok=False,
         )
 
+    if _is_vlm_test_workflow_mode():
+        # Must not reference legacy OpenCV red-IC-board align (`..._bbox_vlm` is allowed).
+        if re.search(r"\brun_align_locator_graph_to_board_ic_bbox\b", code):
+            return ToolResult(
+                text=(
+                    "[vlm_test-guard] `run_align_locator_graph_to_board_ic_bbox` (OpenCV HSV IC box on board) "
+                    "is forbidden when `workflow_mode=vlm_test`. "
+                    "Save **`debug/case12_board_largest_ic_bbox_vlm.json`** then call "
+                    "**`run_align_locator_graph_to_board_ic_bbox_vlm`** "
+                    "(aligned JSON **`source`** = `vlm_ic_correspondence_isotropic_align`)."
+                ),
+                ok=False,
+            )
+
+    blocked_phys = _vlm_test_run_python_guard_physical_board_ic_geometry(code)
+    if blocked_phys is not None:
+        return blocked_phys
+
     buf_out, buf_err = io.StringIO(), io.StringIO()
     _PY_GLOBALS["WORKSPACE"] = workspace
     _PY_GLOBALS["PROJECT_ROOT"] = _RUNTIME_PROJECT_ROOT
@@ -2082,6 +2237,20 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
     pil_open = Image.open
     cv2_mod = _PY_GLOBALS.get("cv2")
     cv2_imread = getattr(cv2_mod, "imread", None) if cv2_mod is not None else None
+    orig_cv2_imwrite = getattr(cv2_mod, "imwrite", None) if cv2_mod is not None else None
+
+    def _guarded_cv2_imwrite(filename: Any, img: Any, *args: Any, **kwargs: Any):
+        if orig_cv2_imwrite is None:
+            return None
+        bn = Path(str(filename)).name.lower()
+        if bn == "case10_largest_ic_box.png":
+            raise RuntimeError(
+                "[vlm_test-guard] Cannot write `case10_largest_ic_box.png` "
+                "(`workflow_mode=vlm_test` skips Part A board IC red box)."
+            )
+        return orig_cv2_imwrite(filename, img, *args, **kwargs)
+
+    _vlm_cv2_imwrite_guard = False
 
     def _patched_exists(path_like: Any) -> bool:
         try:
@@ -2091,12 +2260,28 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
             return orig_exists(path_like)
 
     def _patched_open(file: Any, *args: Any, **kwargs: Any):
+        patched_kwargs = dict(kwargs)
+        mode = "r"
+        if args:
+            mode = str(args[0])
+        elif "mode" in patched_kwargs:
+            mode = str(patched_kwargs["mode"])
+        if (
+            "b" not in mode
+            and "encoding" not in patched_kwargs
+            and any(flag in mode for flag in ("r", "w", "a", "x"))
+        ):
+            patched_kwargs["encoding"] = "utf-8"
         if isinstance(file, (str, os.PathLike)):
             try:
-                return orig_open(_resolve_read(_normalize_runtime_path(file)), *args, **kwargs)
+                return orig_open(
+                    _resolve_read(_normalize_runtime_path(file)),
+                    *args,
+                    **patched_kwargs,
+                )
             except Exception:
-                return orig_open(_normalize_runtime_path(file), *args, **kwargs)
-        return orig_open(file, *args, **kwargs)
+                return orig_open(_normalize_runtime_path(file), *args, **patched_kwargs)
+        return orig_open(file, *args, **patched_kwargs)
 
     def _patched_pil_open(fp: Any, *args: Any, **kwargs: Any):
         if isinstance(fp, (str, os.PathLike)):
@@ -2137,6 +2322,9 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
         Image.open = _patched_pil_open
         if cv2_mod is not None and cv2_imread is not None:
             cv2_mod.imread = _patched_cv2_imread
+            if orig_cv2_imwrite is not None and _is_vlm_test_workflow_mode():
+                cv2_mod.imwrite = _guarded_cv2_imwrite  # type: ignore[assignment]
+                _vlm_cv2_imwrite_guard = True
         with redirect_stdout(buf_out), redirect_stderr(buf_err):
             exec(compile(code, "<agent>", "exec"), _PY_GLOBALS)  # noqa: S102
         out = buf_out.getvalue()
@@ -2163,6 +2351,8 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
         Image.open = pil_open
         if cv2_mod is not None and cv2_imread is not None:
             cv2_mod.imread = cv2_imread
+        if cv2_mod is not None and orig_cv2_imwrite is not None and _vlm_cv2_imwrite_guard:
+            cv2_mod.imwrite = orig_cv2_imwrite
         try:
             os.chdir(prev_cwd)
         except OSError:

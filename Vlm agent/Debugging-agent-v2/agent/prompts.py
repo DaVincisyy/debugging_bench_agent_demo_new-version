@@ -256,11 +256,36 @@ WORKFLOW_PROMPT_HARD_CONSTRAINTS_ZH = dedent("""
 
 1. **Part 0 段 A 必须最先完成**：结合 **`INPUT_PATHS["user_measurement_question"]`** 与原理图（**`schematic_image`**；若有 **`schematic_pdf`** 仅作辅助：`search_pdf_text` / `pdf_page_to_image` **仅限原理图 PDF**，**不得**当作位号图）。在 **`debug/case10_signal_to_tp.json`** 经 **`save_text_file` 落盘之前**，**禁止**对 **`assembly_drawing_pdf`** 调用 **`search_pdf_text`**，**禁止**生成 **`case10_assembly_drawing_tp_marked.png`**。JSON 内 **`tp_id_or_ref`** 为后续**唯一**位号图检索词。
 
-2. **位号图 TP 绿圈（唯一权威路径）**：JSON 落盘后再 **`search_pdf_text`（assembly PDF，query=`tp_id_or_ref` 全文）** → **`pdf_page_to_image`（dpi=864）** → **`debug/case10_assembly_drawing.png`** → **Step0C `run_python`**：固定 **100×100（half=50）** **`tp_work_roi`** 内 OpenCV 圆度过滤与拟合圆 → 全图 **`cv2.circle`** → **`debug/case10_assembly_drawing_tp_marked.png`**，且 **必须** **`cv2.imwrite` → `debug/case10_target_tp_work_roi.png`**（真实子图裁切，**禁止**用全图冒充 ROI）。**禁止**使用 **`pdf_draw_circle_then_rasterize`** **生成或替代** **`case10_assembly_drawing_tp_marked.png`**。
+2. **位号图 TP 绿圈（唯一权威路径）**：JSON 落盘后再 **`search_pdf_text`（assembly PDF，query=`tp_id_or_ref` 全文）** → **工作底图 `debug/case10_assembly_drawing.png`**：**默认** **`pdf_page_to_image`（dpi=864）**；**唯一例外**：若选定 **`page_pdf==1`（1-based）** **且** **`INPUT_PATHS["assembly_drawing_page1_png"]`** 存在，**可复制**该文件为 **`case10_assembly_drawing.png`** 并 **跳过**该页 **`pdf_page_to_image`**（须在 **`stdout`/progress** 写明 **`assembly_source=assembly_drawing_page1_png`**）；**`page_pdf>1` 或非第一页命中时不得用此快捷方式**。**绿圈定心**仍走 **Step0C `run_python`**：固定 **100×100（half=50）** **`tp_work_roi`** 内 OpenCV 圆度过滤与拟合圆 → 全图 **`cv2.circle`** → **`debug/case10_assembly_drawing_tp_marked.png`**，且 **必须** **`cv2.imwrite` → `debug/case10_target_tp_work_roi.png`**（真实子图裁切，**禁止**用全图冒充 ROI）。**浅色细线粉/红丝印圆** 若灰度 **`THRESH_BINARY_INV`** **0 候选**，**同 ROI** 须按 **`STANDARD_WORKFLOW` Step0C 5b** 试 **`faint_hsv_ring`**（HSV + **close** + 略放宽圆度，**须** `stdout` 声明）。**禁止**使用 **`pdf_draw_circle_then_rasterize`** **生成或替代** **`case10_assembly_drawing_tp_marked.png`**。若 shortcut 底图与 **`rect_pdf` 映射**明显错位，须回退并用 **`pdf_page_to_image(dpi=864)`** 重跑 Step0A–0C。
 
 3. **中间 debug 产物**：下列 **`debug/`** 下 PNG/JSON（见 `STANDARD_WORKFLOW` 「最终产物清单」与运行时 `finish` 契约）须齐全；**不**再以 `progress/step_*.md` 作为 `finish` 硬性前提。
 
 4. **Part B StepB3（位号图最大 IC 红框）**：**最终 `bbox` 一定后，下一动必须是 `annotate_image` 覆盖 `debug/case10_assembly_largest_ic_box.png`，再 `view_image`（同一 PNG，`finish` 会检查工具写入的 `debug/case10_stepb3_viewed_largest_ic_box.json` 与当前 PNG mtime 一致），再 `save_text_file` → `case10_assembly_largest_ic.json`**。**位号图硬性要求：至少一轮 `QC_REVISE`（实际体现为 `part_b_stepb3_qc.qc_rounds_used`≥`2`**：首轮看图后按清单裁决 REVISE，改 hints → StepB2 → 再annotate → 再 view → 终轮 `QC_PASS`）**。每次** `annotate_image` 覆盖该 PNG 都会**清除**上述 gate，**必须**再次 `view_image`。**`QC_REVISE` 改框后必须再次 `annotate_image` 覆盖**，禁止保留旧 PNG 或只改 JSON。**禁止**未 `view_image`、未 QC 就写 JSON 或开始 Part A。**实物图 Part A** 无「必须 REVISE」轮数下限。JSON 内 **`part_b_stepb3_qc.final_annotate_overwrote_png_immediately_before_json`** 须为 **`true`**（见 StepB3）。
 
+5. **Part D 路径 A — 锚点图冻结**：**`debug/case10_dual_roi_locator_refs.json`**（字段 **`pairwise_roi`** / **`graph_edges`** / **`references[]`**）与 **`debug/step04_locator_roi_refs.png`** 所定义的 **tp+ref 拓扑与 `ref_id` 编号** 为 **固定输入**。写 **`case10_tp_dual_roi_direct_vlm.json`** 并生成 **`step04_dual_roi_approx_only.png`** 时：**`board_roi_reference_approx` 的 `ref_id` 须与 locator_refs JSON 一一对应**；**禁止**换锚、改名、删增 ref、或写出与 **`pairwise_roi`** **不同构**的实物布局；**允许**整体平移、近似均匀缩放与小像素误差。**做不到则** 置 **`board_roi_target_px_approx`=null**、倾向路径 B 或扩 ROI 重跑 StepD4.0，**禁止**为凑点拆掉拓扑。
+
+6. **Part B 位号图「最大 IC」**：丝印不清时 **`vlm_roi` 须罩在整页可见范围内、面积最大的「矩形类封装」**（典型 QFP/LQFP：矩形塑封+四面引脚带）；**勿**把 **圆形顶或不规则大块屏蔽罩** 默认当成「最大芯片**。细则见 **`STANDARD_WORKFLOW` Part B 段首**。
+
 ---
+""").strip()
+
+
+# Appended to the YAML task ``question`` when CLI runs with ``--mode vlm_test``.
+CLI_WORKFLOW_MODE_VLM_TEST_APPEND_ZH = dedent("""
+## 【CLI `workflow_mode=vlm_test` — 与默认规程冲突时以本节为准】
+
+本附录由 **`python -m agent run ... --mode vlm_test`** 注入。**未**使用该参数时不要执行本节。
+
+1. **Part 0、Part B**：与 **`STANDARD_WORKFLOW`** 一致（位号 TP 绿圈 + 位号最大 IC 红框等）。
+2. **跳过 Part A（实物图「最大 IC」红框 annotate）**：**禁止**在实物工作底图上执行 Part A 的 **IC 红框** `annotate_image` / Step2 OpenCV **定最大芯片红框**；**不得**产出 **`debug/case10_largest_ic_box.png`**、**`debug/case10_largest_ic.json`**。**仍须**产出 **`debug/case10_board_landscape.png`**：**仅**做与规程 **Part A Step0** 等同的 **底板工作图归一**（自 **`INPUT_PATHS["front_board_photo"]`**），**禁止**任务未授权时对底图做几何旋转/镜像/透视校正（若 **Task** 另有硬约束如竖幅保持，从 **Task**）。
+3. **Part C（Step2）**：**`debug/step02_locator_front_anchor.png`** = **复制** **`case10_assembly_largest_ic_box.png`**（不改分辨率）。**`debug/step02_board_front_anchor.png`** = **原样复制** **`case10_board_landscape.png`**（实物图 **无** IC 丝印红框）。**不必**产出 **`debug/board_tp_marked.png`**（本模式 **`finish`** **不**校验该文件）。
+4. **Part D — `case12_step02_vlm_ic_align`（纯 VLM 视觉对应 + Python 几何）**：依靠 VLM 阅读 **`step02_board_front_anchor.png`**（整板实物）及位号侧的 **`debug/case12_step02_locator_graph.png` / `.json`**（带周围 **ref** 拓扑），自行判断实物上最大封装 IC 与位号 **`ref_ic`** 的对应，并给出 JSON（由 **`run_align_locator_graph_to_board_ic_bbox_vlm`** 消费）。
+   - **禁止（工具层已门禁）**：在 **`case10_board_landscape` / `step02_board_front_anchor` / 实物整机照**上用 **`run_python`+OpenCV 轮廓/HSV/`cv2.rectangle`/`annotate_image` 的矩形框**等方法 **先期自动算出**最大 IC bbox，再把同一组数抄进 **`case12_board_largest_ic_bbox_vlm.json`** —— **不得借壳 VLM JSON**。**Part D 之前**底板图只允许 **读取、归一、复制**（如生成 `case10_board_landscape`、复制 step02）。
+   - **Step D1**：`run_python`：**`from case12_step02_graph import run_build_step02_locator_graph`** → **`run_build_step02_locator_graph(Path(<WORKSPACE>))`**。
+   - **Step D2**：`view_image` 等自检；**`save_text_file` → `debug/case12_board_largest_ic_bbox_vlm.json`**，**必须**含 **`ref_ic_center_board_px`**: `[x,y]`（**`step02_board` 像素**）。**尺度**：**要么** **`isotropic_scale_locator_to_board`**（可用 **`s_locator_to_board`**），**要么** **`board_largest_ic_bbox_xyxy`** / **`bbox_board_ic_xyxy`**（详见 **`case12_step02_graph.py`** 中 **`_compute_st_from_vlm_ic_correspondence`**）。
+   - **Step D3**：`run_python`：**`from case12_step02_graph import run_align_locator_graph_to_board_ic_bbox_vlm`** → **`run_align_locator_graph_to_board_ic_bbox_vlm(...)`**，得到 **`case12_board_points_aligned.json`**（**`source`** = **`vlm_ic_correspondence_isotropic_align`**）与 **`case12_board_approx_overlay_opencv.png`**。
+5. **`debug/step03_mapping.json`**：**`mapping_method`** = **`case12_step02_vlm_ic_align`**。
+6. **Step8**：读 **`case12_board_points_aligned.json`** 的 **`board_roi_target_px_approx`**，`annotate_image` → **`step08_final_tp.png`** **`step08_result.json`**，`finish`。
+
+**默认（无 `--mode vlm_test`）仍为「两框直接对应法」** **`case12_step02_opencv_ic_align`**； **`mapping_method` 与本节勿混用**。
 """).strip()

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { defaultVlmAgentRunsDir } from "./defaultPaths.js";
 
 const DEFAULT_AGENT_DIR = path.resolve("..", "Vlm agent", "Debugging-agent-v2");
 const FALLBACK_AGENT_DIR = path.resolve("Vlm agent", "Debugging-agent-v2");
@@ -42,9 +43,9 @@ function extractModelName(stdout) {
 export class RealVlmAgentRunner {
   constructor({
     agentDir = resolveAgentDir(),
-    runsRoot = path.join(process.cwd(), "output", "vlm-agent-runs"),
+    runsRoot = defaultVlmAgentRunsDir(),
     maxSteps = Number(process.env.VLM_AGENT_MAX_STEPS || 80),
-    timeoutMs = Number(process.env.VLM_AGENT_TIMEOUT_MS || 15 * 60 * 1000),
+    timeoutMs = Number(process.env.VLM_AGENT_TIMEOUT_MS || 30 * 60 * 1000),
     connectivityPrecheck = process.env.VLM_AGENT_CONNECTIVITY_PRECHECK !== "false",
     precheckTimeoutMs = Number(process.env.VLM_AGENT_PRECHECK_TIMEOUT_MS || 8000),
     networkRetries = Number(process.env.VLM_AGENT_NETWORK_RETRIES || 3),

@@ -17,9 +17,7 @@ Two tool-calling modes are supported:
 from __future__ import annotations
 
 import json
-import os
 import re
-import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Iterable
@@ -59,13 +57,6 @@ class AssistantReply:
 # --------------------------------------------------------------------------- #
 
 _TOOL_TAG_BLOCK_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
-
-
-def _as_bool_env(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _dedupe_finish_calls(invocations: list[ToolInvocation]) -> list[ToolInvocation]:
@@ -109,31 +100,11 @@ class LLMClient:
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
-        self._client = self._build_client()
-
-    def _build_client(self) -> OpenAI:
-        import httpx
-
-        default_headers: dict[str, str] = {}
-        if _as_bool_env("VLM_FORCE_CONNECTION_CLOSE", False):
-            default_headers["Connection"] = "close"
-
-        # Use a direct HTTP transport with no proxy to bypass Windows system
-        # proxy. The system proxy interferes with TLS to DashScope/other
-        # OpenAI-compatible endpoints, causing WinError 10054 / connection
-        # resets when large image payloads are exchanged.
-        http_client = httpx.Client(
-            timeout=httpx.Timeout(self.cfg.http_timeout_sec),
-            mounts={"all://": httpx.HTTPTransport()},
-        )
-
-        return OpenAI(
-            base_url=self.cfg.base_url,
-            api_key=self.cfg.api_key,
-            timeout=self.cfg.http_timeout_sec,
-            max_retries=self.cfg.http_max_retries,
-            default_headers=default_headers or None,
-            http_client=http_client,
+        self._client = OpenAI(
+            base_url=cfg.base_url,
+            api_key=cfg.api_key,
+            timeout=cfg.http_timeout_sec,
+            max_retries=cfg.http_max_retries,
         )
 
     # ------------------------------------------------------------------ #
@@ -246,18 +217,10 @@ class LLMClient:
                         "supports OpenAI-style tools for your account."
                     ) from e
                 raise
-            except (APIConnectionError, APITimeoutError) as e:
+            except (APIConnectionError, APITimeoutError):
                 if attempt + 1 >= attempts:
                     raise
-                self._client = self._build_client()
-                delay = min(4.0 * (2 ** attempt), 60.0)
-                print(
-                    "[Network Retry] 侦测到链路断开，正在重建 Python OpenAI client "
-                    f"并进行第 {attempt + 2}/{attempts} 次重试: {type(e).__name__}: {e}; "
-                    f"delay={delay:.1f}s",
-                    file=sys.stderr,
-                )
-                time.sleep(delay)
+                time.sleep(min(4.0 * (2 ** attempt), 60.0))
         if resp is None:  # pragma: no cover
             raise RuntimeError("LLMClient.chat: failed without response")
 

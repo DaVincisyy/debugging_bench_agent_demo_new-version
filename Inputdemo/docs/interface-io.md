@@ -267,11 +267,11 @@
 ]
 ```
 
-## 5. Agent Planner
+## 5. VLM Target Execution Mapper
 
-代码位置：`src/agent/planner.js`
+代码位置：`src/agent/vlmTargetExecutionMapper.js`
 
-把 RAG 证据和 VLM 输出合成为可执行计划。
+把 VLM final_answer / MG400 pose 输出映射成固定的机器人执行步骤。
 
 #### Input
 
@@ -547,7 +547,7 @@ Agent 端到端执行完成后，最终对象结构如下。
     {
       "at": "2026-05-11T06:22:42.857Z",
       "state": "EXECUTING",
-      "message": "Plan generated; executing hardware flow."
+      "message": "VLM target execution mapping created; executing hardware flow."
     },
     {
       "at": "2026-05-11T06:22:42.857Z",

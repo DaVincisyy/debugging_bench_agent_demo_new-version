@@ -6,8 +6,6 @@ export function createBenchRun(input) {
     runId: createId("run"),
     state: AgentState.IDLE,
     input,
-    modelInputYaml: null,
-    modelInputYamlFile: null,
     vlmAgentCase: null,
     modelOutput: null,
     plan: null,

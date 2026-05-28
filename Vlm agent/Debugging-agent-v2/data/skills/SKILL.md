@@ -13,7 +13,7 @@ Case YAML should reference it via:
 **模型如何使用本文**：首轮里 `skills_doc` 通常只以 `[file] skills_doc = <路径>` 出现，**正文不会自动注入**。**须**用 **`read_text_file`** 读入。与 **`workflow_doc`（`STANDARD_WORKFLOW.md`）** 同理：任务 YAML **可不再手写**这两项，只要 case 位于 `data/cases/<名称>/` 且存在 **`data/skills/`** 下对应文件。
 
 **与本仓库默认规程的关系**：**各用例的标准主路径**见 **`STANDARD_WORKFLOW.md`**（运行时会出现在 **`inputs.workflow_doc`** 中，可自动注入）。**推荐顺序**：`read_text_file(workflow_doc)` → `read_text_file(skills_doc)`。  
-- **Part 0–D**（原理图→TP、PDF 整页栅格、OpenCV 绿圈、双图最大 IC、`board_tp_marked`、Part D 双 ROI 等）**以 `workflow_doc` 为准**。  
+- **Part 0–D**（原理图→TP、PDF 整页栅格、OpenCV 绿圈、双图最大 IC、`board_tp_marked`、Part D 默认 case12 OpenCV IC 对齐等）**以 `workflow_doc` 为准**。  
 - **`SKILL.md` 本文**侧重 **Step3–8 字段契约**、工具说明与 **历史附录**。  
 - **最终交付**：在实物板工作底图上给出 **目标 TP 的像素位置**（Step8 / `finish`）。
 
@@ -26,7 +26,7 @@ Case YAML should reference it via:
 
 **默认目标**：工程师意图 + 原理图 + **可搜索位号图 PDF** + **实物板图** → **目标 TP 在实物板工作底图上的像素坐标**（经 Part 0–D 与 `finish`）。
 
-**默认执行顺序**（逐步约束见 **`STANDARD_WORKFLOW.md`**，经 **`inputs.workflow_doc`** 读取）：**Part 0** → **Part B** → **Part A** → **Part C** → **Part D（Step3–8，`mapping_method`=`case10_dual_roi_layout`）**。
+**默认执行顺序**（逐步约束见 **`STANDARD_WORKFLOW.md`**，经 **`inputs.workflow_doc`** 读取）：**Part 0** → **Part B** → **Part A** → **Part C** → **Part D（默认 `mapping_method`=`case12_step02_opencv_ic_align`；备用 `case10_dual_roi_layout`）**。
 
 任务应同时提供 **`inputs.workflow_doc`**（规程）与 **`inputs.skills_doc`**（本文）。二者可由 **`load_task` 自动注入**（见 `STANDARD_WORKFLOW.md` 文首），task 里只列数据文件即可。
 
@@ -37,8 +37,9 @@ Case YAML should reference it via:
 - **`user_measurement_question`**：工程师测量 / 调试意图（自然语言）。
 - **`schematic_image`** 和/或 **`schematic_pdf`**（至少一种；PNG 只用 `view_image`；PDF 可 `search_pdf_text` 辅助）。
 - **`assembly_drawing_pdf`**：带文本层的位号图 PDF（Part 0 搜索与整页栅格）。
+- **`assembly_drawing_page1_png`**（可选）：**PDF 第 1 页**的清晰整页 PNG；**仅当** `search_pdf_text` 选定 **`page_pdf==1`** 时，可复制为 **`debug/case10_assembly_drawing.png`** 并 **跳过**该页 **`pdf_page_to_image`**（见 **`STANDARD_WORKFLOW.md` Step0A）；**其它页**必须忽略此键。**case12** 中场链可不配。
 - **`front_board_photo`**：实物板照片（Part A 中归一为横幅工作底图）。
-- 可选 **`assembly_drawing`** 等 legacy 整页 PNG：仅作对照或 PDF 失败 fallback，**主路径**不以之替代 PDF 栅格（见 workflow）。
+- 可选 **`assembly_drawing`** 等 legacy 整页 PNG：仅作对照或 PDF 失败 fallback，**不得**冒充 **`assembly_drawing_page1_png` shortcut**（shortcut 仅用专用键 + 第一页条件）。
 
 **读取顺序**：先 **`read_text_file`** 读 **`inputs.workflow_doc`**，再读 **`inputs.skills_doc`**。
 

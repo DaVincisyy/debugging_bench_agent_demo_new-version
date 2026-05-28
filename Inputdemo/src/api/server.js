@@ -1,29 +1,30 @@
 import http from "node:http";
+import path from "node:path";
 import { createDefaultAgent } from "../agent/factory.js";
-import { buildModelInputYaml } from "../agent/modelInputYaml.js";
-import { buildPlan } from "../agent/planner.js";
+import { mapVlmTargetToExecution } from "../agent/vlmTargetExecutionMapper.js";
 import { parseUserCommand } from "../agent/inputCore.js";
 import { createBenchRun, transition } from "../domain/run.js";
 import { AgentState, StepKind } from "../domain/states.js";
-import { getRun, saveRun, updateRun, appendRunEvent } from "./runStore.js";
+import { getRun, saveRun, updateRun, appendRunEvent, getRunEvents } from "./runStore.js";
 import { readJsonBody, sendJson } from "../utils/http.js";
 import { webPage } from "./webPage.js";
-import { Mg400ArmController } from "../adapters/mg400ArmController.js";
+import { RobotGatewayClient } from "../adapters/robotGatewayClient.js";
 import { readMg400Config, writeMg400Config } from "../adapters/mg400Config.js";
 import { VlmAgentCaseAdapter } from "../adapters/vlmAgentCaseAdapter.js";
 import { VlmAgentServiceRunner } from "../adapters/vlmAgentServiceRunner.js";
 import { RealVlmAgentRunner } from "../adapters/realVlmAgentRunner.js";
-import { writeModelInputYamlFile } from "../adapters/modelInputYamlFileWriter.js";
 import { MockEquipmentController } from "../adapters/mockEquipmentController.js";
 import { ReportGenerator } from "../adapters/reportGenerator.js";
 import { getEthernetInfo } from "../adapters/ethernetConfig.js";
+import { defaultVlmAgentRunsDir } from "../adapters/defaultPaths.js";
 
 const port = Number(process.env.PORT || 3000);
 const cliFallbackRunner = new RealVlmAgentRunner();
 const agent = createDefaultAgent({ vlmRunner: cliFallbackRunner });
 const serviceRunner = process.env.VLM_AGENT_RUNNER === "cli" ? null : new VlmAgentServiceRunner();
 const serviceCaseAdapter = serviceRunner ? new VlmAgentCaseAdapter() : null;
-const serviceArmController = new Mg400ArmController();
+const robotGateway = new RobotGatewayClient();
+const serviceArmController = robotGateway;
 const serviceEquipmentController = new MockEquipmentController();
 const serviceReportGenerator = new ReportGenerator();
 
@@ -74,20 +75,20 @@ async function route(request, response) {
 
   if (request.method === "POST" && url.pathname === "/api/mg400/test") {
     const config = await readMg400Config();
-    sendJson(response, 200, await Mg400ArmController.runCommand("test", { config }));
+    sendJson(response, 200, await robotGateway.runCommand("test", { config }));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/api/mg400/status") {
     const config = await readMg400Config();
-    sendJson(response, 200, await Mg400ArmController.runCommand("status", { config }));
+    sendJson(response, 200, await robotGateway.runCommand("status", { config }));
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/mg400/command") {
     const command = await readJsonBody(request);
     const config = await readMg400Config();
-    sendJson(response, 200, await Mg400ArmController.runCommand("command", { config, command }));
+    sendJson(response, 200, await robotGateway.runCommand("command", { config, command }));
     return;
   }
 
@@ -106,6 +107,12 @@ async function route(request, response) {
     }
 
     sendJson(response, 200, run);
+    return;
+  }
+
+  const eventsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/events$/);
+  if (request.method === "GET" && eventsMatch) {
+    await sendRunEvents(request, response, eventsMatch[1], Number(url.searchParams.get("since") || 0));
     return;
   }
 
@@ -130,12 +137,7 @@ server.listen(port, () => {
 async function startServiceBackedRun(input) {
   const run = createBenchRun(input);
   run.serviceMode = true;
-  transition(run, AgentState.PREPARING, "Parsed input; creating VLM service task.");
-  run.modelInputYaml = buildModelInputYaml(input);
-  run.modelInputYamlFile = await writeModelInputYamlFile({
-    runId: run.runId,
-    yaml: run.modelInputYaml
-  });
+  transition(run, AgentState.PREPARING, "Parsed input; creating Debugging-agent-v2 task.");
   run.vlmAgentCase = await serviceCaseAdapter.adapt({ runId: run.runId, input });
   run.vlmService = await serviceRunner.createRun({
     run_id: run.runId,
@@ -145,12 +147,12 @@ async function startServiceBackedRun(input) {
     max_steps: serviceRunner.maxSteps,
     ...(serviceRunner.envFile ? { env_file: serviceRunner.envFile } : {})
   });
+  saveRun(run);
   appendRunEvent(run.runId, "node.vlm_forwarded", {
     serviceUrl: serviceRunner.baseUrl,
     serviceStatus: run.vlmService.status,
     taskFile: run.vlmAgentCase.taskFile
   });
-  saveRun(run);
   finalizeServiceBackedRun(run.runId).catch((error) => {
     const stored = getRun(run.runId);
     if (stored) {
@@ -182,7 +184,16 @@ async function startCliFallbackRun(input, serviceError) {
 async function finalizeServiceBackedRun(runId) {
   const run = getRun(runId);
   if (!run) return;
-  const completed = await serviceRunner.waitForRun(runId);
+  const completed = await serviceRunner.waitForRun(runId, {
+    onEvent: (event) => {
+      appendRunEvent(runId, event.type, {
+        ...event.payload,
+        serviceSeq: event.seq,
+        serviceEventId: event.event_id,
+        serviceTimestamp: event.timestamp
+      });
+    }
+  });
   run.vlmService = completed;
   if (completed.status !== "succeeded") {
     run.error = completed.error || `VLM service status: ${completed.status}`;
@@ -195,15 +206,15 @@ async function finalizeServiceBackedRun(runId) {
   const pixel = normalizePixel(finalAnswer?.pixel);
   run.vlmObservation = buildVlmObservation({ input: run.input, service: completed, finalAnswer, pixel });
   run.modelOutput = buildModelOutput({ service: completed, finalAnswer, pixel });
-  run.plan = buildPlan({
+  run.plan = mapVlmTargetToExecution({
     input: run.input,
     ragEvidence: run.ragEvidence || [],
     vlmObservation: run.vlmObservation,
     modelOutput: run.modelOutput
   });
-  appendRunEvent(runId, "node.plan_created", { plan: run.plan });
+  appendRunEvent(runId, "node.execution_mapping_created", { plan: run.plan });
 
-  transition(run, AgentState.EXECUTING, "VLM service completed; executing MG400 flow.");
+  transition(run, AgentState.EXECUTING, "VLM service completed; target execution mapping created; executing MG400 flow.");
   const blockedLocations = new Map();
   for (const step of run.plan.steps) {
     if (step.kind === StepKind.ARM_MOTION || step.kind === StepKind.VISUAL_CAPTURE) {
@@ -254,7 +265,7 @@ async function finalizeServiceBackedRun(runId) {
 
 function serviceWorkspace(input) {
   const caseId = sanitizeSegment(input.caseId) || sanitizeSegment(input.command) || "inputdemo-case";
-  return `${process.cwd()}\\output\\vlm-agent-runs\\${caseId}`;
+  return path.join(defaultVlmAgentRunsDir(), caseId);
 }
 
 function buildVlmObservation({ input, service, finalAnswer, pixel }) {
@@ -304,6 +315,8 @@ function buildVlmObservation({ input, service, finalAnswer, pixel }) {
 }
 
 function buildModelOutput({ service, finalAnswer, pixel }) {
+  const pose = normalizePose(finalAnswer?.mg400Pose || finalAnswer?.mg400_pose || finalAnswer?.pose)
+    || poseFromPixel(pixel || finalAnswer?.pixel);
   return {
     model: process.env.VLM_MODEL || "vlm-agent-service",
     provider: "debugging-agent-v2-service",
@@ -312,12 +325,14 @@ function buildModelOutput({ service, finalAnswer, pixel }) {
     testPoint: finalAnswer?.tp_id || finalAnswer?.test_point || null,
     confidence: Number.isFinite(Number(finalAnswer?.confidence)) ? Number(finalAnswer.confidence) : null,
     pixel: pixel ? { x: pixel[0], y: pixel[1] } : null,
-    mg400Pose: normalizePose(finalAnswer?.mg400Pose || finalAnswer?.mg400_pose || finalAnswer?.pose),
+    mg400Pose: pose,
     finalAnswer,
     summaryPath: service.summary_path,
     runDir: service.run_dir,
     workspace: service.run_dir ? service.run_dir.replace(/\\runs\\.*$/, "") : null,
-    reason: "VLM service returned localization output."
+    reason: pose
+      ? "VLM service returned localization output; pose was returned or derived from pixel."
+      : "VLM service returned localization output."
   };
 }
 
@@ -341,6 +356,14 @@ function normalizePose(value) {
   return pose;
 }
 
+function poseFromPixel(value) {
+  if (!Array.isArray(value) || value.length !== 2) return null;
+  const x = Number(value[0]);
+  const y = Number(value[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y), z: 0, r: 0 };
+}
+
 function sanitizeSegment(value) {
   return String(value || "")
     .trim()
@@ -358,4 +381,49 @@ function isServiceUnavailable(error) {
     error.cause?.message,
     error.cause?.code
   ].filter(Boolean).join("\n"));
+}
+
+async function sendRunEvents(request, response, runId, since) {
+  const run = getRun(runId);
+  if (!run) {
+    sendJson(response, 404, { error: "Run not found." });
+    return;
+  }
+
+  const wantsSse = String(request.headers.accept || "").includes("text/event-stream");
+  if (!wantsSse) {
+    sendJson(response, 200, { runId, events: getRunEvents(runId, since) || [] });
+    return;
+  }
+
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+
+  let seq = Number(since || 0);
+  let closed = false;
+  request.on("close", () => {
+    closed = true;
+  });
+
+  while (!closed) {
+    const events = getRunEvents(runId, seq);
+    if (events === null) break;
+    for (const event of events) {
+      seq = Math.max(seq, Number(event.seq) || seq);
+      response.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+
+    const current = getRun(runId);
+    if (!current || current.report || current.error) break;
+    await sleep(500);
+  }
+
+  response.end();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

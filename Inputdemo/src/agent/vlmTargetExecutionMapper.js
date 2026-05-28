@@ -1,7 +1,7 @@
 import { StepKind } from "../domain/states.js";
 import { evaluateMg400PoseReachability } from "../domain/mg400Reachability.js";
 
-export function buildPlan({ input, vlmObservation, ragEvidence, modelOutput }) {
+export function mapVlmTargetToExecution({ input, vlmObservation, ragEvidence, modelOutput }) {
   const measurement = vlmObservation.recommendedMeasurements[0];
   const targetPose = modelOutput?.mg400Pose || null;
   const targetLocationId = measurement?.locationId || "vlm-target";
@@ -9,6 +9,7 @@ export function buildPlan({ input, vlmObservation, ragEvidence, modelOutput }) {
 
   return {
     objective: input.command,
+    mapper: "VLM Target Execution Mapper",
     evidenceIds: ragEvidence.map((item) => item.id),
     steps: [
       {

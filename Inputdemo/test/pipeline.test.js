@@ -16,7 +16,10 @@ import { MockVlmClient } from "../src/adapters/mockVlmClient.js";
 import { ReportGenerator } from "../src/adapters/reportGenerator.js";
 import { VlmAgentCaseAdapter } from "../src/adapters/vlmAgentCaseAdapter.js";
 import { RealVlmAgentRunner } from "../src/adapters/realVlmAgentRunner.js";
+import { RealVlmAgentModelClient } from "../src/adapters/realVlmAgentClient.js";
 import { VlmAgentServiceRunner } from "../src/adapters/vlmAgentServiceRunner.js";
+import { RobotGatewayClient } from "../src/adapters/robotGatewayClient.js";
+import { Mg400ArmController } from "../src/adapters/mg400ArmController.js";
 import { evaluateMg400PoseReachability } from "../src/domain/mg400Reachability.js";
 
 test("bench agent runs the mocked VLM-to-report flow with image and PDF model inputs", async () => {
@@ -84,15 +87,8 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.equal(run.input.cameraImage.name, "PCBA_IMG.jpg");
     assert.equal(run.state, AgentState.REPORTING);
     assert.equal(run.vlmObservation.model, "mock-vlm-v0");
-    assert.match(run.modelInputYaml, /Instruction: "Measure 5V rail ripple"/);
-    assert.match(run.modelInputYaml, /Input_Assets:/);
-    assert.match(run.modelInputYaml, /Model_Attachments:/);
-    assert.match(run.modelInputYaml, /bit_pdf_count: 1/);
-    assert.match(run.modelInputYaml, /schematic_pdf_count: 1/);
-    assert.match(run.modelInputYaml, /media_kind: "pdf"/);
-    assert.match(run.modelInputYaml, /Output_Requirement:/);
-    assert.match(run.modelInputYamlFile, /output[\\/]yaml[\\/]run_/);
-    assert.equal(await readFile(run.modelInputYamlFile, "utf8"), run.modelInputYaml);
+    assert.equal("modelInputYaml" in run, false);
+    assert.equal("modelInputYamlFile" in run, false);
     assert.match(run.vlmAgentCase.taskFile, /task\.yaml$/);
     assert.match(run.vlmAgentCase.caseDir, /case-001$/);
     assert.match(run.vlmAgentCase.taskYaml, /user_measurement_question:/);
@@ -147,6 +143,58 @@ test("MG400 reachability guard adjusts workspace envelope violations", () => {
   assert.equal(result.adjusted, true);
   assert.ok(result.pose.x < 500);
   assert.match(result.message, /Adjusted MG400 pose/);
+});
+
+test("MG400 enable command only requires the dashboard TCP port", async () => {
+  const dashboardRequests = [];
+  const dashboardServer = net.createServer((socket) => {
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      while (buffer.includes("\n")) {
+        const newline = buffer.indexOf("\n");
+        const command = buffer.slice(0, newline).trim();
+        buffer = buffer.slice(newline + 1);
+        dashboardRequests.push(command);
+        if (command === "RobotMode()") {
+          socket.write("0,{5}\n");
+        } else if (command === "GetPose()") {
+          socket.write("0,{100,0,80,0}\n");
+        } else {
+          socket.write("0,{}\n");
+        }
+      }
+    });
+  });
+  await new Promise((resolve) => dashboardServer.listen(0, "127.0.0.1", resolve));
+
+  const closedMotionServer = net.createServer();
+  await new Promise((resolve) => closedMotionServer.listen(0, "127.0.0.1", resolve));
+  const closedMotionPort = closedMotionServer.address().port;
+  await new Promise((resolve) => closedMotionServer.close(resolve));
+
+  try {
+    const result = await Mg400ArmController.runCommand("command", {
+      config: {
+        mode: "mg400",
+        ip: "127.0.0.1",
+        dashboardPort: dashboardServer.address().port,
+        motionPort: closedMotionPort,
+        timeoutMs: 500,
+        autoEnable: true,
+        load: 0.5
+      },
+      command: { name: "enable" }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "enable");
+    assert.equal(result.result.command, "EnableRobot()");
+    assert.deepEqual(dashboardRequests, ["EnableRobot()", "RobotMode()", "GetPose()"]);
+  } finally {
+    await new Promise((resolve) => dashboardServer.close(resolve));
+  }
 });
 
 test("real VLM runner prechecks Debugging-agent-v2 .env before launching", async () => {
@@ -387,4 +435,85 @@ test("VLM agent service runner falls back to the CLI runner when the service is 
   assert.equal(result.serviceFallback.serviceUrl, "http://127.0.0.1:1");
   assert.equal(fallbackCalls.length, 1);
   assert.deepEqual(fallbackCalls[0], payload);
+});
+
+test("real VLM model client derives temporary MG400 pose from pixel when pose is missing", async () => {
+  const client = new RealVlmAgentModelClient({
+    runner: {
+      run() {
+        return Promise.resolve({
+          model: "summary-replay",
+          finalAnswer: {
+            tp_id: "TP1",
+            pixel: [237, 1243],
+            confidence: 0.7
+          },
+          pixel: [237, 1243],
+          summaryPath: "summary.json",
+          runDir: "runs/latest",
+          workspace: "workspace",
+          precheck: { ok: true },
+          attempts: []
+        });
+      }
+    }
+  });
+
+  const result = await client.generateMg400Pose({
+    input: {},
+    vlmAgentCase: {}
+  });
+
+  assert.deepEqual(result.mg400Pose, { x: 237, y: 1243, z: 0, r: 0 });
+  assert.deepEqual(result.pixel, { x: 237, y: 1243 });
+});
+
+test("robot gateway client sends robot execution over HTTP/TCP service boundary", async () => {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body: body ? JSON.parse(body) : null
+      });
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        ok: true,
+        stepId: requests.at(-1).body.step.id,
+        status: "COMPLETED",
+        controller: "robot-gateway-test",
+        tcpCommand: "MovJ(1,2,3,4)"
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+
+  try {
+    const client = new RobotGatewayClient({
+      baseUrl: `http://127.0.0.1:${port}`,
+      timeoutMs: 1000
+    });
+    const result = await client.execute({
+      id: "step-001",
+      command: "move",
+      targetPose: { x: 1, y: 2, z: 3, r: 4 }
+    });
+
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(result.controller, "robot-gateway-test");
+    assert.deepEqual(requests.map((item) => `${item.method} ${item.url}`), [
+      "POST /v1/robot/execute"
+    ]);
+    assert.equal(requests[0].body.step.id, "step-001");
+    assert.match(requests[0].body.config.mode, /^(simulation|mg400)$/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

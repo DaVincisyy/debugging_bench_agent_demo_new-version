@@ -179,21 +179,55 @@ def _merged_circle_detections(
     return merged
 
 
-def _detect_green_tp_center(bgr: np.ndarray) -> tuple[float, float, float] | None:
-    """Largest (0,255,0)-like region in locator ROI → circle center + radius."""
+def _green_tp_mask_bgr(bgr: np.ndarray) -> np.ndarray:
+    """Union mask for Step1 / Part0 green TP mark (HSV + BGR, same band as Step3 tools)."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    m_hsv = cv2.inRange(hsv, np.array([40, 100, 100]), np.array([80, 255, 255]))
     b, g, r = cv2.split(bgr)
-    mask = ((g > 130) & (r < 130) & (b < 130)).astype(np.uint8) * 255
-    if int(mask.sum()) < 80:
-        mask = ((g > 110) & (r < 150) & (b < 150) & (g > r + 35) & (g > b + 35)).astype(np.uint8) * 255
+    m_dom = ((g > 100) & (r < 160) & (b < 160) & (g > r + 20) & (g > b + 20)).astype(np.uint8) * 255
+    m_pure = ((g >= 200) & (r <= 80) & (b <= 80)).astype(np.uint8) * 255
+    mask = cv2.bitwise_or(m_hsv, m_dom)
+    mask = cv2.bitwise_or(mask, m_pure)
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    return mask
+
+
+def _detect_green_tp_center(bgr: np.ndarray) -> tuple[float, float, float] | None:
+    """Green TP circle on locator / assembly raster → (cx, cy, radius_px).
+
+    Uses the same HSV band as ``crop_green_tp_neighborhood_on_locator`` / Step3 mapping,
+    plus BGR fallbacks for ``cv2.circle(..., (0,255,0))`` strokes and hollow rings.
+    """
+    mask = _green_tp_mask_bgr(bgr)
+    if int(mask.sum()) < 40:
+        return None
+
+    n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        mask, connectivity=8
+    )
+    if n_labels > 1:
+        best_i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        area = int(stats[best_i, cv2.CC_STAT_AREA])
+        if area >= 20:
+            comp = (labels == best_i).astype(np.uint8) * 255
+            contours, _ = cv2.findContours(
+                comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
+            if contours:
+                best = max(contours, key=cv2.contourArea)
+                (cx, cy), rad = cv2.minEnclosingCircle(best)
+                return float(cx), float(cy), float(max(rad, 4.0))
+
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
     best = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(best) < 30.0:
+    if cv2.contourArea(best) < 15.0:
         return None
     (cx, cy), rad = cv2.minEnclosingCircle(best)
-    return float(cx), float(cy), float(rad)
+    return float(cx), float(cy), float(max(rad, 4.0))
 
 
 def _polar_from_tp(
@@ -211,6 +245,8 @@ def _polar_from_tp(
 def _node_sort_key(nid: str) -> tuple[int, int]:
     if nid == "tp":
         return (0, 0)
+    if nid == "ref_ic":
+        return (1, 0)
     if nid.startswith("ref_"):
         try:
             return (1, int(nid.split("_", 1)[1]))

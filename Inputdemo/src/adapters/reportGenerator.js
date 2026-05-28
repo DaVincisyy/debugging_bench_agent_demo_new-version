@@ -25,7 +25,12 @@ export class ReportGenerator {
       ],
       measurements,
       nextActions: failed.length === 0
-        ? ["Review real VLM summary evidence before closed-loop hardware execution.", "Add calibrated pixel-to-MG400 transform if final_answer has no pose."]
+        ? [
+            "Review real VLM summary evidence before closed-loop hardware execution.",
+            pose
+              ? "Replace the temporary pixel-to-pose mapping with calibrated camera-to-MG400 transform before real hardware contact."
+              : "Add calibrated pixel-to-MG400 transform if final_answer has no pose."
+          ]
         : [
             "Review failed measurement locations.",
             blockedArm?.fallbackAction || "Run retry flow with updated VLM capture."

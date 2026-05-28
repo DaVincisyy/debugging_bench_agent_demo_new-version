@@ -3,6 +3,7 @@
 Usage:
     python -m agent run tasks/example_tp_locate.yaml
     python -m agent run tasks/example_tp_locate.yaml --model gpt-4.1 --max-steps 30
+    python -m agent run tasks/example_tp_locate.yaml --mode vlm_test
     python -m agent ask "where is TP12 in the front camera?" \\
         --image locator=data/locator.png --image front=data/front.jpg
 
@@ -28,7 +29,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Override VLM_MODEL for this run.")
     p.add_argument("--base-url", help="Override VLM_BASE_URL for this run.")
     p.add_argument("--max-steps", type=int, default=None,
-                   help="Maximum planning/tool steps (default: 20).")
+                   help="Maximum planning/tool steps (default: 80).")
     p.add_argument("--workspace", default="workspace",
                    help="Workspace directory for artifacts and run logs.")
     p.add_argument("--no-native-tools", action="store_true",
@@ -38,6 +39,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="Run the agent on a YAML task spec.")
     p_run.add_argument("task_file", help="Path to a task YAML file.")
+    p_run.add_argument(
+        "--mode",
+        default="default",
+        choices=("default", "vlm_test"),
+        metavar="MODE",
+        help=(
+            "Workflow variant: "
+            "`default` = STANDARD_WORKFLOW Part D `case12_step02_opencv_ic_align`; "
+            "`vlm_test` = skip Part A board IC box, pure-VLM Part D (`case12_step02_vlm_ic_align`). "
+            "(Env override: `VLM_AGENT_WORKFLOW_MODE`)"
+        ),
+    )
     p_run.add_argument("--name", help="Optional run name suffix.")
 
     p_ask = sub.add_parser("ask", help="Run the agent on an ad-hoc question.")
@@ -80,6 +93,9 @@ def main(argv: list[str] | None = None) -> int:
         overrides["VLM_BASE_URL"] = args.base_url
     if args.no_native_tools:
         overrides["VLM_USE_NATIVE_TOOLS"] = "false"
+
+    if args.cmd == "run":
+        overrides["workflow_mode"] = getattr(args, "mode", "default")
 
     cfg = load_config(env_path=args.env, overrides=overrides)
     agent = Agent(cfg)

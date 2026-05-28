@@ -6,6 +6,9 @@
   "private": true,
   "scripts": {
     "start": "node src/api/server.js",
+    "robot-gateway": "node src/gateway/robotGatewayServer.js",
+    "vlm:case": "node scripts/runVlmCaseDirect.js",
+    "replay-summary": "node scripts/replaySummarySmoke.js",
     "demo": "node src/cli/runDemo.js",
     "test": "node --test"
   },

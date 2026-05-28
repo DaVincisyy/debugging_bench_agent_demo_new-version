@@ -534,6 +534,9 @@ export const webPage = String.raw`<!doctype html>
     let capturedCameraImage = null;
     let currentRun = null;
     let currentRunStatusTimer = null;
+    let currentRunEventsTimer = null;
+    let currentRunEventsSource = null;
+    let currentRunEventSeq = 0;
 
     const fields = {
       mode: document.querySelector("#mode"),
@@ -557,10 +560,11 @@ export const webPage = String.raw`<!doctype html>
     function appendEventLog(event) {
       eventLogEl.classList.remove("hidden");
       const payload = event.payload || {};
+      const display = formatEventDisplay(event);
       const parts = [
         "[" + new Date().toLocaleTimeString() + "]",
-        payload.title || event.type,
-        payload.message || ""
+        display.title,
+        display.message
       ];
       if (payload.artifacts?.length) parts.push("产物: " + payload.artifacts.join(" | "));
       const line = parts.filter(Boolean).join(" - ");
@@ -568,39 +572,152 @@ export const webPage = String.raw`<!doctype html>
       eventLogEl.scrollTop = eventLogEl.scrollHeight;
     }
 
+    function formatEventDisplay(event) {
+      const payload = event.payload || {};
+      if (payload.title || payload.message) {
+        return { title: payload.title || event.type, message: payload.message || "" };
+      }
+      if (event.type === "agent.assistant") {
+        const rawStep = payload.index ?? payload.step;
+        const step = Number.isFinite(Number(rawStep)) ? Number(rawStep) + 1 : null;
+        const tools = Number(payload.tool_call_count ?? payload.tool_calls?.length ?? 0);
+        const elapsed = Number(payload.elapsed_sec || 0).toFixed(1);
+        const content = String(payload.content || "").replace(/\s+/g, " ").slice(0, 120);
+        return {
+          title: step ? "VLM step " + step : "VLM assistant",
+          message: tools + " tool call(s), " + elapsed + "s" + (content ? " - " + content : "")
+        };
+      }
+      if (event.type === "tool.finished") {
+        const status = payload.ok === false ? "failed" : "ok";
+        const final = payload.is_final ? ", final" : "";
+        const text = String(payload.text || "").replace(/\s+/g, " ").slice(0, 140);
+        return {
+          title: "Tool " + (payload.name || "finished"),
+          message: status + final + (text ? " - " + text : "")
+        };
+      }
+      if (event.type === "agent.step") {
+        const rawStep = payload.index ?? payload.step;
+        const step = Number.isFinite(Number(rawStep)) ? Number(rawStep) + 1 : null;
+        const toolCalls = payload.tool_calls || (payload.tool_call ? [payload.tool_call] : []);
+        const names = toolCalls.map((item) => item.name).filter(Boolean).join(", ");
+        const status = payload.tool_result?.ok === false ? "failed" : "done";
+        return {
+          title: step ? "VLM step " + step + " " + status : "VLM step " + status,
+          message: names || ""
+        };
+      }
+      if (event.type === "agent.waiting") {
+        const rawStep = payload.index ?? payload.step;
+        const step = Number.isFinite(Number(rawStep)) ? Number(rawStep) + 1 : null;
+        return {
+          title: step ? "VLM step " + step + " waiting" : "VLM waiting",
+          message: "Waiting for model response..."
+        };
+      }
+      if (event.type === "agent.run_dir") {
+        return { title: "VLM workspace ready", message: payload.run_dir || payload.workspace || "" };
+      }
+      if (event.type === "agent.final") {
+        return { title: "VLM final answer", message: payload.summary_path || payload.stopped_reason || "" };
+      }
+      if (event.type === "agent.failed") {
+        return { title: "VLM failed", message: payload.error || "" };
+      }
+      return { title: event.type, message: "" };
+    }
+
     function watchRunStatus(runId) {
-      if (currentRunStatusTimer) clearInterval(currentRunStatusTimer);
+      stopRunWatchers();
+      currentRunEventSeq = 0;
       eventLogEl.textContent = "";
       eventLogEl.classList.remove("hidden");
       appendEventLog({
         type: "agent.progress",
         payload: {
           title: "VLM run queued",
-          message: "Waiting for service result without /events streaming."
+          message: "Waiting for VLM service events."
         }
       });
+      watchRunEvents(runId);
 
       const refresh = async () => {
         try {
           const run = await jsonFetch("/api/runs/" + encodeURIComponent(runId));
           renderResult(run);
           if (run.report || run.error) {
-            clearInterval(currentRunStatusTimer);
-            currentRunStatusTimer = null;
+            stopRunWatchers();
             setStatus(runStatus, run.error ? run.error : "完成", run.error ? "error" : "ok");
             return;
           }
           const state = run.state || run.vlmService?.status || "running";
           setStatus(runStatus, "VLM service running: " + state);
         } catch (error) {
-          clearInterval(currentRunStatusTimer);
-          currentRunStatusTimer = null;
+          stopRunWatchers();
           setStatus(runStatus, error.message, "error");
         }
       };
 
       currentRunStatusTimer = setInterval(refresh, 5000);
       refresh();
+    }
+
+    function stopRunWatchers() {
+      if (currentRunStatusTimer) clearInterval(currentRunStatusTimer);
+      currentRunStatusTimer = null;
+      if (currentRunEventsTimer) clearInterval(currentRunEventsTimer);
+      currentRunEventsTimer = null;
+      if (currentRunEventsSource) currentRunEventsSource.close();
+      currentRunEventsSource = null;
+    }
+
+    function watchRunEvents(runId) {
+      const url = "/api/runs/" + encodeURIComponent(runId) + "/events";
+      if (window.EventSource) {
+        currentRunEventsSource = new EventSource(url + "?since=0");
+        currentRunEventsSource.onmessage = (message) => appendRunEventMessage(message);
+        currentRunEventsSource.onerror = () => {
+          if (currentRunEventsSource) currentRunEventsSource.close();
+          currentRunEventsSource = null;
+          startEventPolling(runId);
+        };
+        return;
+      }
+      startEventPolling(runId);
+    }
+
+    function startEventPolling(runId) {
+      if (currentRunEventsTimer) return;
+      const poll = async () => {
+        try {
+          const data = await jsonFetch(
+            "/api/runs/" + encodeURIComponent(runId) + "/events?since=" + encodeURIComponent(currentRunEventSeq)
+          );
+          for (const event of data.events || []) appendRunEvent(event);
+        } catch {
+          if (currentRunEventsTimer) clearInterval(currentRunEventsTimer);
+          currentRunEventsTimer = null;
+        }
+      };
+      currentRunEventsTimer = setInterval(poll, 1000);
+      poll();
+    }
+
+    function appendRunEventMessage(message) {
+      try {
+        appendRunEvent(JSON.parse(message.data));
+      } catch {
+        appendEventLog({
+          type: "event.parse_failed",
+          payload: { title: "Event parse failed", message: message.data }
+        });
+      }
+    }
+
+    function appendRunEvent(event) {
+      currentRunEventSeq = Math.max(currentRunEventSeq, Number(event.seq) || currentRunEventSeq);
+      appendEventLog(event);
     }
 
     function showEthernetDetails(data) {

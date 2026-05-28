@@ -80,12 +80,12 @@ function speedValue(config) {
 }
 
 function commandHost(config) {
-  if (config.mode === "simulation") return config.simHost || DEFAULT_HOST;
+  if (config.mode === "simulation") return config.host || config.simHost || DEFAULT_HOST;
   return config.ip && config.ip !== "192.168.2.6" ? config.ip : DEFAULT_HOST;
 }
 
 function commandPort(config) {
-  if (config.mode === "simulation") return Number(config.simDashboardPort || config.port || DEFAULT_PORT);
+  if (config.mode === "simulation") return Number(config.port || config.simDashboardPort || DEFAULT_PORT);
   return Number(config.port || config.dashboardPort || DEFAULT_PORT);
 }
 
