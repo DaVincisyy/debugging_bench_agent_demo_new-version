@@ -1,0 +1,53 @@
+[
+  {
+    "step_id": "part0_signal_to_tp",
+    "title": "Part0-A infer target TP",
+    "objective": "Write debug/case10_signal_to_tp.json from user question + schematic evidence.",
+    "done_any_artifacts": [
+      "debug/case10_signal_to_tp.json"
+    ]
+  },
+  {
+    "step_id": "part0_pdf_search_and_mark",
+    "title": "Part0-B/C search TP in assembly PDF and green-circle it",
+    "objective": "Produce target TP search JSON and green-circled assembly image.",
+    "done_any_artifacts": [
+      "debug/case10_target_tp_pdf_search.json",
+      "debug/case10_assembly_drawing.png",
+      "debug/case10_target_tp_work_roi.png",
+      "debug/case10_assembly_drawing_tp_marked.png"
+    ]
+  },
+  {
+    "step_id": "partb_locator_largest_ic",
+    "title": "PartB assembly largest IC",
+    "objective": "Create case10_assembly_largest_ic_box.png and case10_assembly_largest_ic.json.",
+    "done_any_artifacts": [
+      "debug/case10_assembly_vlm_hints.json",
+      "debug/case10_assembly_opencv_debug.png",
+      "debug/case10_assembly_largest_ic_box.png",
+      "debug/case10_assembly_largest_ic.json"
+    ]
+  },
+  {
+    "step_id": "parta_board_largest_ic",
+    "title": "PartA board largest IC",
+    "objective": "VLM gives board ROI first, then OpenCV runs inside ROI on stable horizontal board frame.",
+    "done_any_artifacts": [
+      "debug/case10_vlm_hints.json",
+      "debug/case10_opencv_debug.png",
+      "debug/case10_largest_ic_box.png",
+      "debug/case10_largest_ic.json"
+    ]
+  },
+  {
+    "step_id": "partd_case12_align_and_finish",
+    "title": "PartD case12 align + finish",
+    "objective": "Create case12 aligned outputs and final step08 artifacts, then finish.",
+    "done_any_artifacts": [
+      "debug/case12_board_points_aligned.json",
+      "debug/step08_result.json",
+      "debug/step08_final_tp.png"
+    ]
+  }
+]

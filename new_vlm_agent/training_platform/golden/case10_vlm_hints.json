@@ -1,0 +1,15 @@
+{
+  "approx_bbox_norm": [0.45, 0.10, 0.65, 0.40],
+  "region_hint": "Upper center of the board",
+  "visual_cues": "Large square black QFP package, likely the main processor or FPGA, labeled U501 on assembly drawing",
+  "opencv_ballpark": {
+    "prefer_hsv_dark_package": true,
+    "hsv_upper_v": 60,
+    "morph_kernel_size": 5,
+    "morph_dilate_iter": 2,
+    "morph_erode_iter": 1,
+    "aspect_ratio": [0.8, 1.2],
+    "package_short_side_px": [200, 1000],
+    "fallback_thresh_binary_inv": 60
+  }
+}

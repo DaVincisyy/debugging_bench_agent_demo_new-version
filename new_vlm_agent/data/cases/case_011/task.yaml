@@ -1,0 +1,16 @@
+# inputs 路径相对本文件。完整规程由运行时的 compose_agent_question 从 data/skills/STANDARD_WORKFLOW.md 注入首轮 Task 文本（含 Part 0 硬约束）。
+question: |
+  按仓库默认「标准测点定位流程」全量执行：根据 `user_measurement_question` 与原理图确定目标 TP，在位号图 PDF 检索、整页栅格、OpenCV 绿圈与后续 Part B–C（至 **`step02_*` + `board_tp_marked`**）。**Part D 默认**：`case12_step02_opencv_ic_align`（`case12_step02_locator_graph` + OpenCV 双 IC 红框对齐 → `case12_board_approx_overlay_opencv.png` → Step8 → `finish`），见 **`STANDARD_WORKFLOW.md`**。若任务显式要写 **`mapping_method: case10_dual_roi_layout`**，可改走备用双 ROI Step3–8。须产出规程所列 **`debug/case10_*`**、**`step*`**、`progress/*`（progress 仍为可选笔记）。
+
+inputs:
+  user_measurement_question: |
+    Sheet1 输入保护那段，上电时我想用示波器抓一下功率管前面那个小信号管（控制功率管开通关断）的波形和时序，看使能/驱动这一级什么时候起来、边沿干不干净。不是看电池或滤波后母线上电斜坡那种纯电源电压点。
+  schematic_image: voyah_hvac_v01_20240729_01.png
+  schematic_pdf: voyah_hvac_v01_20240729.pdf
+  assembly_drawing_pdf: "位号图7.29.pdf"
+  assembly_drawing_page1_png: "位号图7.29_01(12).png"
+  front_board_photo: PCBA_IMG.jpg
+  workflow_plan_file: ../../skills/STANDARD_WORKFLOW_PLAN.case011.json
+  board_id: "HM-TMSC-03-case10-draw-frame"
+  engineer_note: |
+    Part B 本轮不使用网格辅助图：直接基于 `debug/case10_assembly_drawing_tp_marked.png` 估 `vlm_roi`。

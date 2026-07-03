@@ -1,0 +1,464 @@
+{
+  "1": {
+    "verify_run_id": "20260604-131516-task",
+    "primary_run_id": "20260604-130404-task",
+    "git_commit": "4f95a62",
+    "stopped_reason": "finish-tool-called",
+    "step_count": 13,
+    "part_timing": {
+      "part0_s": 73.0855,
+      "partb_s": 38.5496,
+      "parta_s": 35.4269,
+      "partc_s": 0.0,
+      "partd_s": 42.0241,
+      "unknown_s": 14.8789,
+      "total_s": 203.965
+    },
+    "final_pixel": [
+      2037,
+      1114
+    ],
+    "steps": [
+      {
+        "step": 0,
+        "step_total_s": 14.88,
+        "llm_s": 14.82,
+        "tools_s": 0.0,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 1,
+        "step_total_s": 40.77,
+        "llm_s": 40.62,
+        "tools_s": 0.01,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 2,
+        "step_total_s": 11.97,
+        "llm_s": 7.84,
+        "tools_s": 4.01,
+        "tools": [
+          "search_pdf_text"
+        ]
+      },
+      {
+        "step": 3,
+        "step_total_s": 16.46,
+        "llm_s": 15.62,
+        "tools_s": 0.68,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ]
+      },
+      {
+        "step": 4,
+        "step_total_s": 3.89,
+        "llm_s": 3.83,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 5,
+        "step_total_s": 23.3,
+        "llm_s": 23.25,
+        "tools_s": 0.01,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 6,
+        "step_total_s": 10.73,
+        "llm_s": 9.66,
+        "tools_s": 1.01,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 7,
+        "step_total_s": 4.52,
+        "llm_s": 4.44,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 8,
+        "step_total_s": 21.39,
+        "llm_s": 21.31,
+        "tools_s": 0.01,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 9,
+        "step_total_s": 14.04,
+        "llm_s": 11.46,
+        "tools_s": 2.23,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 10,
+        "step_total_s": 12.82,
+        "llm_s": 8.24,
+        "tools_s": 4.38,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ]
+      },
+      {
+        "step": 11,
+        "step_total_s": 15.75,
+        "llm_s": 11.87,
+        "tools_s": 3.31,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ]
+      },
+      {
+        "step": 12,
+        "step_total_s": 13.46,
+        "llm_s": 12.64,
+        "tools_s": 0.02,
+        "tools": [
+          "finish"
+        ]
+      }
+    ],
+    "apply_plan_actions": null,
+    "git_diff_stat": [
+      " training_platform/autonomous_rounds/round_001.json | 371 +++++++++++++++++++++",
+      " training_platform/cursor_apply.py                  | 263 ++++++++++++++-",
+      " training_platform/cursor_sdk_winfix.py             |  91 +++++",
+      " training_platform/train_loop_log.jsonl             |   2 +",
+      " workspace/debug/case10_assembly_largest_ic.json    |  18 +-",
+      " workspace/debug/case10_assembly_opencv_debug.png   | Bin 1294712 -> 1298581 bytes",
+      " workspace/debug/case10_assembly_opencv_mask.png    | Bin 35706 -> 40887 bytes",
+      " workspace/debug/case10_assembly_vlm_hints.json     |   7 +-",
+      " workspace/debug/case10_largest_ic.json             |  10 +-",
+      " workspace/debug/case10_opencv_debug.png            | Bin 12332342 -> 12328809 bytes",
+      " workspace/debug/case10_signal_to_tp.json           |   2 +-",
+      " workspace/debug/case10_target_tp_pdf_search.json   |   4 +-",
+      " workspace/debug/case10_thresh_debug.png            | Bin 27194 -> 25780 bytes",
+      " workspace/debug/case10_vlm_hints.json              |   7 +-",
+      " 35 files changed, 2128 insertions(+), 85 deletions(-)"
+    ]
+  },
+  "3": {
+    "verify_run_id": "20260604-135613-task",
+    "primary_run_id": "20260604-133911-task",
+    "git_commit": "2676dd4",
+    "stopped_reason": "finish-tool-called",
+    "step_count": 13,
+    "part_timing": {
+      "part0_s": 47.014,
+      "partb_s": 39.2546,
+      "parta_s": 31.4034,
+      "partc_s": 0.0,
+      "partd_s": 54.0412,
+      "unknown_s": 18.3667,
+      "total_s": 190.0799
+    },
+    "final_pixel": [
+      2037,
+      1114
+    ],
+    "steps": [
+      {
+        "step": 0,
+        "step_total_s": 18.37,
+        "llm_s": 18.28,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 1,
+        "step_total_s": 17.45,
+        "llm_s": 17.27,
+        "tools_s": 0.04,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 2,
+        "step_total_s": 10.88,
+        "llm_s": 6.88,
+        "tools_s": 3.88,
+        "tools": [
+          "search_pdf_text"
+        ]
+      },
+      {
+        "step": 3,
+        "step_total_s": 13.69,
+        "llm_s": 12.99,
+        "tools_s": 0.63,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ]
+      },
+      {
+        "step": 4,
+        "step_total_s": 4.99,
+        "llm_s": 4.93,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 5,
+        "step_total_s": 25.84,
+        "llm_s": 25.78,
+        "tools_s": 0.02,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 6,
+        "step_total_s": 9.38,
+        "llm_s": 8.29,
+        "tools_s": 1.02,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 7,
+        "step_total_s": 4.03,
+        "llm_s": 3.96,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 8,
+        "step_total_s": 22.19,
+        "llm_s": 22.12,
+        "tools_s": 0.01,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 9,
+        "step_total_s": 9.21,
+        "llm_s": 6.97,
+        "tools_s": 1.93,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 10,
+        "step_total_s": 12.19,
+        "llm_s": 7.83,
+        "tools_s": 4.11,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ]
+      },
+      {
+        "step": 11,
+        "step_total_s": 14.02,
+        "llm_s": 10.43,
+        "tools_s": 3.08,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ]
+      },
+      {
+        "step": 12,
+        "step_total_s": 27.83,
+        "llm_s": 27.09,
+        "tools_s": 0.01,
+        "tools": [
+          "finish"
+        ]
+      }
+    ],
+    "apply_plan_actions": null,
+    "git_diff_stat": [
+      " .../analysis_reports/20260604-135613-task.json     |   98 ++",
+      " training_platform/autonomous_log.jsonl             |    1 +",
+      " training_platform/autonomous_rounds/round_002.json | 1821 ++++++++++++++++++++",
+      " training_platform/train_loop_log.jsonl             |    1 +",
+      " workspace/debug/case10_assembly_largest_ic.json    |   18 +-",
+      " workspace/debug/case10_assembly_opencv_debug.png   |  Bin 1301054 -> 1301103 bytes",
+      " workspace/debug/case10_assembly_opencv_mask.png    |  Bin 55485 -> 40139 bytes",
+      " workspace/debug/case10_assembly_vlm_hints.json     |    7 +-",
+      " workspace/debug/case10_largest_ic.json             |   22 +-",
+      " workspace/debug/case10_opencv_debug.png            |  Bin 12324569 -> 12340281 bytes",
+      " workspace/debug/case10_signal_to_tp.json           |    7 +-",
+      " workspace/debug/case10_target_tp_pdf_search.json   |    2 +-",
+      " workspace/debug/case10_thresh_debug.png            |  Bin 23626 -> 43372 bytes",
+      " workspace/debug/case10_vlm_hints.json              |    2 +-",
+      " 29 files changed, 2367 insertions(+), 169 deletions(-)"
+    ]
+  },
+  "4": {
+    "verify_run_id": "20260604-141105-task",
+    "primary_run_id": "20260604-135931-task",
+    "git_commit": "a9a2938",
+    "stopped_reason": "finish-tool-called",
+    "step_count": 12,
+    "part_timing": {
+      "part0_s": 95.0831,
+      "partb_s": 43.2699,
+      "parta_s": 42.4715,
+      "partc_s": 0.0,
+      "partd_s": 39.4658,
+      "unknown_s": 0.0,
+      "total_s": 220.2903
+    },
+    "final_pixel": [
+      2037,
+      1114
+    ],
+    "steps": [
+      {
+        "step": 0,
+        "step_total_s": 55.05,
+        "llm_s": 54.98,
+        "tools_s": 0.02,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 1,
+        "step_total_s": 16.77,
+        "llm_s": 12.61,
+        "tools_s": 4.03,
+        "tools": [
+          "search_pdf_text"
+        ]
+      },
+      {
+        "step": 2,
+        "step_total_s": 18.32,
+        "llm_s": 17.41,
+        "tools_s": 0.77,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ]
+      },
+      {
+        "step": 3,
+        "step_total_s": 4.94,
+        "llm_s": 4.87,
+        "tools_s": 0.01,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 4,
+        "step_total_s": 28.68,
+        "llm_s": 28.63,
+        "tools_s": 0.02,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 5,
+        "step_total_s": 10.3,
+        "llm_s": 9.14,
+        "tools_s": 1.09,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 6,
+        "step_total_s": 4.29,
+        "llm_s": 4.22,
+        "tools_s": 0.0,
+        "tools": [
+          "view_image"
+        ]
+      },
+      {
+        "step": 7,
+        "step_total_s": 25.76,
+        "llm_s": 25.68,
+        "tools_s": 0.02,
+        "tools": [
+          "save_text_file"
+        ]
+      },
+      {
+        "step": 8,
+        "step_total_s": 16.71,
+        "llm_s": 14.36,
+        "tools_s": 2.01,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ]
+      },
+      {
+        "step": 9,
+        "step_total_s": 12.89,
+        "llm_s": 8.44,
+        "tools_s": 4.24,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ]
+      },
+      {
+        "step": 10,
+        "step_total_s": 12.46,
+        "llm_s": 8.83,
+        "tools_s": 3.14,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ]
+      },
+      {
+        "step": 11,
+        "step_total_s": 14.11,
+        "llm_s": 13.39,
+        "tools_s": 0.03,
+        "tools": [
+          "finish"
+        ]
+      }
+    ],
+    "apply_plan_actions": null,
+    "git_diff_stat": [
+      " .../analysis_reports/20260604-141105-task.json     | 109 ++++",
+      " training_platform/autonomous_log.jsonl             |   1 +",
+      " training_platform/autonomous_rounds/round_003.json | 636 +++++++++++++++++++++",
+      " training_platform/train_loop_log.jsonl             |   1 +",
+      " workspace/debug/case10_assembly_largest_ic.json    |  18 +-",
+      " workspace/debug/case10_assembly_opencv_debug.png   | Bin 1301103 -> 1290590 bytes",
+      " workspace/debug/case10_assembly_opencv_mask.png    | Bin 40139 -> 39513 bytes",
+      " workspace/debug/case10_assembly_vlm_hints.json     |   2 +-",
+      " workspace/debug/case10_largest_ic.json             |  20 +-",
+      " workspace/debug/case10_opencv_debug.png            | Bin 12340281 -> 12333655 bytes",
+      " workspace/debug/case10_signal_to_tp.json           |   2 +-",
+      " workspace/debug/case10_target_tp_pdf_search.json   |   4 +-",
+      " workspace/debug/case10_thresh_debug.png            | Bin 43372 -> 28397 bytes",
+      " workspace/debug/case10_vlm_hints.json              |   2 +-",
+      " 25 files changed, 1062 insertions(+), 75 deletions(-)"
+    ]
+  }
+}

@@ -69,6 +69,43 @@ export async function listEthernetAdapters() {
   return Array.isArray(parsed) ? parsed : [parsed];
 }
 
+export async function autoDetectAdapter() {
+  // Find the best active adapter that has an IPv4 address
+  const command = [
+    "Get-NetIPConfiguration |",
+    "Where-Object { $_.IPv4DefaultGateway -ne $null -and $_.NetAdapter.Status -eq 'Up' } |",
+    "Select-Object -First 1 InterfaceAlias |",
+    "ConvertTo-Json -Depth 1"
+  ].join(" ");
+  try {
+    const stdout = await runPowerShell(command);
+    const parsed = stdout.trim() ? JSON.parse(stdout) : null;
+    if (parsed && parsed.InterfaceAlias) {
+      return parsed.InterfaceAlias;
+    }
+  } catch {
+    // fall through
+  }
+
+  // Fallback: pick any Up adapter with an IPv4 address
+  const fallback = [
+    "Get-NetIPConfiguration |",
+    "Where-Object { $_.IPv4Address -ne $null -and $_.NetAdapter.Status -eq 'Up' } |",
+    "Select-Object -First 1 InterfaceAlias |",
+    "ConvertTo-Json -Depth 1"
+  ].join(" ");
+  try {
+    const stdout = await runPowerShell(fallback);
+    const parsed = stdout.trim() ? JSON.parse(stdout) : null;
+    if (parsed && parsed.InterfaceAlias) {
+      return parsed.InterfaceAlias;
+    }
+  } catch {
+    // give up
+  }
+  return null;
+}
+
 export async function getEthernetInfo(name) {
   const adapterName = assertSafeText(name, "Adapter name");
   const command = [

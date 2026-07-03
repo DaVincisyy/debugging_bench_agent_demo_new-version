@@ -1,0 +1,78 @@
+# ============================================================
+# 测试用例：case_001_tp12_front（全流程 Step1-8）
+#
+# 本模板用于“从零输入”起跑：
+# 1) 无标记位号图 PDF（两页：正面/背面）
+# 2) 实物图正面照片
+# 3) 原理图 PDF（用于 signal -> TP 推断）
+#
+# inputs 下的相对路径 = 相对 *本 task.yaml 所在目录* 解析。
+# ============================================================
+
+# Do not inline full STANDARD_WORKFLOW.md in every LLM turn (keeps prompt ~8k vs ~41k).
+embed_workflow_in_prompt: false
+
+question: |
+  你需要完成 Step1-8 全流程，不可跳步。
+
+  任务目标：
+  - 根据 `target_signal` 在原理图中定位对应测试点（Step1）。
+  - 在位号图正面页中找到目标测试点并用绿色圆圈标注（Step1 输出）。
+  - 在位号图正面页中找到**丝印最清晰、便于与实物对齐的同一颗芯片**并画红框（Step2 输出）。
+  - 在实物图正面中找到**同一颗**芯片并画红框（Step2 输出）。
+  - 基于 Step1/2 产物继续执行 Step3-8，最终在实物图正面输出 TP 像素坐标。
+
+  输入说明：
+  1) schematic_pdf: 原理图 PDF；
+  2) locator_pdf: 无标记位号图 PDF（两页：front/back）；
+  3) front_board_photo: 无标记实物图正面照片（PNG/JPG）；
+  4) target_signal: 目标测试信号（net/signal 名称，例如 C_MOTOR_STEP）。
+  注意：不提供固定页号输入，Step1 必须自行判断 TP 在位号图哪一页并导出该页标注图。
+
+  Step1 输出约定（必须产出）：
+  - 输出目标测试点编号（例如 TP413）。
+  - `debug/step01_locator_front_marked.png`：
+    位号图 front 页，绿色圆圈圈出目标 TP。
+  - `debug/step01_signal_to_tp.json`：
+    至少包含 `target_signal`, `tp_id_or_ref`, `locator_page`, `evidence`。
+
+  Step2 输出约定（必须产出；**两张 PNG 必须实际落盘**）：
+  - 输入必须使用 Step1 产物 `debug/step01_locator_front_marked.png` 与 `front_board_photo`。
+  - `debug/step02_locator_front_anchor.png`：
+    位号图 front：丝印清晰的锚定芯片红框（含引脚边界），并保留 Step1 的绿色圆圈。**禁止**跳过保存该文件。
+  - `debug/step02_board_front_anchor.png`：
+    实物图 front：同一芯片红框（四边精确）。**禁止**跳过保存该文件。
+  - `debug/step02_anchor_mapping.json`：
+    至少包含 `anchor_ref`, `locator_box`, `board_box`。
+
+  Step3-8 强制产物（必须遵守）：
+  - `debug/step03_mapping.json`
+  - `debug/step03_prior_on_board.png`
+  - `debug/step04_roi_crop.png`
+  - `debug/step57_candidates_scored.png`
+  - `debug/step08_final_tp.png`
+
+  过程约束（必须遵守）：
+  - 每完成一个步骤都写 `progress/step_XX.md`（step_01 到 step_08）。
+  - 每个 step 文件至少包含：输入、关键判断、中间产物路径、下一步计划。
+  - Step1 必须先用 `search_pdf_text` 在原理图中检索 `target_signal` 锁定候选页，
+    再仅转换候选页到图片，并调用 `view_image` 用多模态视觉识别对应 TP 编号。
+  - Step3 的 `progress/step_03.md` 必须明确坐标系：
+    origin=top-left, +x=right, +y=down, unit=pixel，并注明坐标所属图像。
+  - 最终必须调用 `finish` 返回结构化结果：
+    tp_id / camera_view / pixel / confidence / needs_user_help / user_message / reasoning。
+
+inputs:
+  skills_doc: ../../skills/SKILL.md
+  workflow_doc: ../../skills/STANDARD_WORKFLOW.md
+  assembly_drawing_pdf: 位号图7.29.pdf
+  locator_pdf: 位号图7.29.pdf
+  front_board_photo: PCBA_IMG.jpg
+  schematic_pdf: voyah_hvac_v01_20240729.pdf
+  target_signal: C_MOTOR_STEP
+  # Step3+ 明确消费 Step2 产物（两张都带红框；locator 图还保留 Step1 绿圈）
+  front_locator_marked: debug/step02_locator_front_anchor.png
+  front_board_marked: debug/step02_board_front_anchor.png
+  board_id: "HM-TMSC-03"
+  engineer_note: |
+    当前为全流程试跑（Step1-8）。仅有正面实物图；若证据不足，请输出候选点与置信度并说明缺失信息。

@@ -1,0 +1,2006 @@
+{
+  "10": {
+    "primary": {
+      "run_id": "20260604-163237-task",
+      "stopped_reason": "assistant-stopped-without-tool-call",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 227.3094,
+        "total_s": 227.3094
+      },
+      "step_count": 80,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.9589,
+          "llm_s": 2.9541,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3453,
+          "llm_s": 2.3407,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4016,
+          "llm_s": 2.3968,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8278,
+          "llm_s": 2.8243,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7701,
+          "llm_s": 2.7659,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4102,
+          "llm_s": 2.406,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0747,
+          "llm_s": 3.0705,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.194,
+          "llm_s": 3.19,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8906,
+          "llm_s": 2.8872,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.727,
+          "llm_s": 1.724,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 10,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.9683,
+          "llm_s": 3.9638,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 11,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.7584,
+          "llm_s": 1.7553,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 12,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8746,
+          "llm_s": 2.8709,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 13,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7037,
+          "llm_s": 2.6992,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 14,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4717,
+          "llm_s": 2.4675,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 15,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.309,
+          "llm_s": 2.3046,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 16,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1962,
+          "llm_s": 3.1914,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 17,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.3767,
+          "llm_s": 3.3724,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 18,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2087,
+          "llm_s": 2.2041,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 19,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7244,
+          "llm_s": 2.7212,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 20,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8606,
+          "llm_s": 2.8575,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 21,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3419,
+          "llm_s": 2.3369,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 22,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.0988,
+          "llm_s": 2.0937,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 23,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.1278,
+          "llm_s": 4.1227,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 24,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.667,
+          "llm_s": 2.6633,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 25,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.3628,
+          "llm_s": 3.3581,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 26,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2958,
+          "llm_s": 2.2902,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 27,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1444,
+          "llm_s": 2.1392,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 28,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5646,
+          "llm_s": 2.5605,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 29,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3602,
+          "llm_s": 2.3561,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 30,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.0651,
+          "llm_s": 5.062,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 31,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.2434,
+          "llm_s": 5.239,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 32,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2232,
+          "llm_s": 2.2211,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 33,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.9419,
+          "llm_s": 2.9387,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 34,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.2723,
+          "llm_s": 3.2678,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 35,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.5838,
+          "llm_s": 3.5801,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 36,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2574,
+          "llm_s": 2.2528,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 37,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 17.8139,
+          "llm_s": 17.8095,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 38,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.048,
+          "llm_s": 2.0424,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 39,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.0017,
+          "llm_s": 1.9968,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 40,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.511,
+          "llm_s": 2.5053,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 41,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.9775,
+          "llm_s": 1.9732,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 42,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.8861,
+          "llm_s": 1.8806,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 43,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.4919,
+          "llm_s": 1.4873,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 44,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2232,
+          "llm_s": 2.2194,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 45,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.1369,
+          "llm_s": 4.1303,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 46,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8896,
+          "llm_s": 2.8842,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 47,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.7419,
+          "llm_s": 3.7383,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 48,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.2318,
+          "llm_s": 3.2292,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 49,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.3378,
+          "llm_s": 5.3323,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 50,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7216,
+          "llm_s": 2.7175,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 51,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3886,
+          "llm_s": 2.3842,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 52,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1766,
+          "llm_s": 2.1721,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 53,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.5853,
+          "llm_s": 1.582,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 54,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.6726,
+          "llm_s": 2.6701,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 55,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.219,
+          "llm_s": 2.2154,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 56,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7416,
+          "llm_s": 2.7382,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 57,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1105,
+          "llm_s": 2.1063,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 58,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8351,
+          "llm_s": 2.83,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 59,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7281,
+          "llm_s": 2.723,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 60,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5834,
+          "llm_s": 2.5782,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 61,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.9828,
+          "llm_s": 1.9777,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 62,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.7068,
+          "llm_s": 1.7037,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 63,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1406,
+          "llm_s": 2.1364,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 64,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5946,
+          "llm_s": 2.5906,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 65,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7404,
+          "llm_s": 2.7361,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 66,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.7962,
+          "llm_s": 1.7927,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 67,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.9612,
+          "llm_s": 2.9567,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 68,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2429,
+          "llm_s": 2.2382,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 69,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.8298,
+          "llm_s": 1.8254,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 70,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.8052,
+          "llm_s": 1.801,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 71,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.9629,
+          "llm_s": 1.9604,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 72,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7075,
+          "llm_s": 2.704,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 73,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1409,
+          "llm_s": 2.1362,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 74,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.298,
+          "llm_s": 2.2928,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 75,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.7941,
+          "llm_s": 1.7906,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 76,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7838,
+          "llm_s": 2.7796,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 77,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4569,
+          "llm_s": 2.4511,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 78,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.6346,
+          "llm_s": 2.6305,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 79,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0736,
+          "llm_s": 3.0694,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-164110-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 30.4876,
+        "total_s": 30.4876
+      },
+      "step_count": 9,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.8302,
+          "llm_s": 3.824,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.3117,
+          "llm_s": 4.3073,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.8498,
+          "llm_s": 3.8441,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0969,
+          "llm_s": 3.0916,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.6091,
+          "llm_s": 2.6045,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.7321,
+          "llm_s": 3.7267,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.8524,
+          "llm_s": 3.8468,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7298,
+          "llm_s": 2.7252,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4756,
+          "llm_s": 2.4712,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    }
+  },
+  "11": {
+    "primary": {
+      "run_id": "20260604-164148-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 23.1117,
+        "total_s": 23.1117
+      },
+      "step_count": 9,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.7886,
+          "llm_s": 3.7844,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3111,
+          "llm_s": 2.3069,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.9877,
+          "llm_s": 2.9826,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8308,
+          "llm_s": 2.8275,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3627,
+          "llm_s": 2.3578,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2449,
+          "llm_s": 2.2397,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5831,
+          "llm_s": 2.5776,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.7328,
+          "llm_s": 1.7285,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.27,
+          "llm_s": 2.2659,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-164917-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 33.0015,
+        "total_s": 33.0015
+      },
+      "step_count": 9,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.958,
+          "llm_s": 5.9527,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.6628,
+          "llm_s": 3.6597,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.3649,
+          "llm_s": 3.3619,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3264,
+          "llm_s": 2.3224,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3679,
+          "llm_s": 2.3647,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.3124,
+          "llm_s": 5.308,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.6269,
+          "llm_s": 3.6222,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.2952,
+          "llm_s": 3.2899,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.087,
+          "llm_s": 3.0819,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    }
+  },
+  "12": {
+    "primary": {
+      "run_id": "20260604-164957-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 30.7544,
+        "total_s": 30.7544
+      },
+      "step_count": 9,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.6161,
+          "llm_s": 4.609,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0987,
+          "llm_s": 3.0942,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3759,
+          "llm_s": 2.3738,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.3895,
+          "llm_s": 3.3842,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.6618,
+          "llm_s": 3.6568,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.6269,
+          "llm_s": 3.6223,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.5165,
+          "llm_s": 3.513,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1788,
+          "llm_s": 3.174,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.2902,
+          "llm_s": 3.2861,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-165448-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 27.2542,
+        "total_s": 27.2542
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.401,
+          "llm_s": 3.398,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5325,
+          "llm_s": 2.5303,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1563,
+          "llm_s": 2.1526,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.692,
+          "llm_s": 2.6879,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.9928,
+          "llm_s": 3.9876,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.5232,
+          "llm_s": 3.519,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2264,
+          "llm_s": 2.2219,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0047,
+          "llm_s": 3.0011,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.6725,
+          "llm_s": 1.6683,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.0528,
+          "llm_s": 2.0475,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    }
+  },
+  "13": {
+    "primary": {
+      "run_id": "20260604-165522-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 32.7064,
+        "total_s": 32.7064
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.0673,
+          "llm_s": 4.064,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1951,
+          "llm_s": 2.1909,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7334,
+          "llm_s": 2.7298,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1726,
+          "llm_s": 2.1701,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5851,
+          "llm_s": 2.583,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1588,
+          "llm_s": 2.1546,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.4544,
+          "llm_s": 3.4511,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1465,
+          "llm_s": 3.1425,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 8.0418,
+          "llm_s": 8.0373,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1514,
+          "llm_s": 2.1473,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-170416-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 89.7743,
+        "total_s": 89.7743
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.8871,
+          "llm_s": 3.8841,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.812,
+          "llm_s": 3.8068,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 54.0485,
+          "llm_s": 54.0443,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1195,
+          "llm_s": 2.1128,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 14.8634,
+          "llm_s": 14.8588,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.1619,
+          "llm_s": 2.1574,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.0336,
+          "llm_s": 2.0287,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4182,
+          "llm_s": 2.4121,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7915,
+          "llm_s": 2.7869,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.6386,
+          "llm_s": 1.6335,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    }
+  },
+  "16": {
+    "primary": {
+      "run_id": "20260604-172850-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 54.0815,
+        "total_s": 54.0815
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 6.5697,
+          "llm_s": 6.5654,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 5.1632,
+          "llm_s": 5.159,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.5335,
+          "llm_s": 4.5289,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.4531,
+          "llm_s": 3.449,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1832,
+          "llm_s": 3.1791,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 19.9763,
+          "llm_s": 19.9723,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.5627,
+          "llm_s": 3.5578,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8876,
+          "llm_s": 2.8841,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2809,
+          "llm_s": 2.2775,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4713,
+          "llm_s": 2.4672,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-173440-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 32.0777,
+        "total_s": 32.0777
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.7485,
+          "llm_s": 4.7444,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1577,
+          "llm_s": 3.1541,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3616,
+          "llm_s": 2.3571,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.6593,
+          "llm_s": 2.6562,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.7823,
+          "llm_s": 4.7786,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0504,
+          "llm_s": 3.0473,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.0809,
+          "llm_s": 3.0775,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.1566,
+          "llm_s": 3.1519,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3009,
+          "llm_s": 2.2971,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7795,
+          "llm_s": 2.7758,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    }
+  },
+  "17": {
+    "primary": {
+      "run_id": "20260604-173521-task",
+      "stopped_reason": "tool_call_timeout",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 27.5877,
+        "total_s": 27.5877
+      },
+      "step_count": 10,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 4.2329,
+          "llm_s": 4.2281,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.8816,
+          "llm_s": 2.8766,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.139,
+          "llm_s": 2.1369,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.5944,
+          "llm_s": 3.5912,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 4,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.104,
+          "llm_s": 3.1007,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 5,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.0815,
+          "llm_s": 2.0782,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 6,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.7202,
+          "llm_s": 2.7151,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 7,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.5712,
+          "llm_s": 2.5664,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 8,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.4291,
+          "llm_s": 2.4239,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 9,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 1.8338,
+          "llm_s": 1.8291,
+          "tools_s": 0.0,
+          "fast_fail": null
+        }
+      ]
+    },
+    "verify": {
+      "run_id": "20260604-174043-task",
+      "stopped_reason": "exception:BadRequestError",
+      "part_timing": {
+        "part0_s": 0.0,
+        "partb_s": 0.0,
+        "parta_s": 0.0,
+        "partc_s": 0.0,
+        "partd_s": 0.0,
+        "unknown_s": 12.3466,
+        "total_s": 12.3466
+      },
+      "step_count": 4,
+      "steps": [
+        {
+          "step": 0,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 3.7898,
+          "llm_s": 3.7847,
+          "tools_s": 0.0,
+          "fast_fail": 1.0
+        },
+        {
+          "step": 1,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.2877,
+          "llm_s": 2.2822,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 2,
+          "tools": [
+            "(no tool / blocked)"
+          ],
+          "step_total_s": 2.3416,
+          "llm_s": 2.3376,
+          "tools_s": 0.0,
+          "fast_fail": null
+        },
+        {
+          "step": 3,
+          "tools": [
+            "view_image"
+          ],
+          "step_total_s": 3.9275,
+          "llm_s": 3.9222,
+          "tools_s": 0.002,
+          "fast_fail": null
+        }
+      ]
+    }
+  }
+}

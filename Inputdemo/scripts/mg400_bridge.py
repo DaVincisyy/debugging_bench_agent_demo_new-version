@@ -187,8 +187,17 @@ def status(robot):
 
 def prepare_for_motion(robot, config):
     responses = []
+    # 清错
     responses.append(require_ok(robot.dash("ClearError()")))
-    responses.append(require_ok(robot.dash("Continue()")))
+    # 尝试继续, 失败则复位后重试 (碰撞限位后需要 ResetRobot)
+    cont_result = robot.dash("Continue()")
+    if not cont_result["ok"]:
+        responses.append(require_ok(robot.dash("ResetRobot()")))
+        time.sleep(0.5)
+        responses.append(require_ok(robot.dash("ClearError()")))
+        responses.append(require_ok(robot.dash("Continue()")))
+    else:
+        responses.append(cont_result)
     mode = robot.robot_mode()
     if mode["code"] == 4 and config.get("autoEnable", True):
         responses.append(enable_robot(robot, config))
@@ -291,7 +300,7 @@ def action_command(payload):
         if name == "pose":
             robot.connect_dashboard()
             return {"ok": True, "action": name, "robot": status(robot)}
-        if name == "clearError":
+        elif name == "clearError":
             robot.connect_dashboard()
             result = require_ok(robot.dash("ClearError()"))
         elif name == "enable":
@@ -302,7 +311,7 @@ def action_command(payload):
             result = require_ok(robot.dash("DisableRobot()"))
         elif name == "pause":
             robot.connect_dashboard()
-            result = require_ok(robot.dash("Pause()"))
+            result = require_ok(robot.dash("Stop()"))  # MG400 uses Stop(), not Pause()
         elif name == "continue":
             robot.connect_dashboard()
             result = require_ok(robot.dash("Continue()"))
@@ -310,13 +319,30 @@ def action_command(payload):
             robot.connect_dashboard()
             result = require_ok(robot.dash("ResetRobot()"))
         elif name == "jog":
-            robot.connect()
-            prepare = prepare_for_motion(robot, config)
+            # 先通过 Dashboard 恢复 (清错+复位), 再通过 Motion 发 Jog
+            robot.connect_dashboard()
+            robot.dash("ClearError()")
+            robot.dash("ResetRobot()")
+            time.sleep(0.3)
+            robot.dash("Continue()")
+            mode = robot.robot_mode()
+            if mode["code"] == 4:
+                enable_robot(robot, config)
+                time.sleep(0.5)
+            robot.dash(f"SpeedFactor({speed_value(config)})")
+            # 停止残留 jog
+            robot.connect_motion()
+            try:
+                robot.move("MoveJog()")
+            except Exception:
+                pass
+            time.sleep(0.05)
+            # 发送新方向
             axis = str(command.get("axis", "")).upper()
             if axis not in {"X+", "X-", "Y+", "Y-", "Z+", "Z-", "R+", "R-", "J1+", "J1-", "J2+", "J2-", "J3+", "J3-", "J4+", "J4-"}:
                 raise Mg400Error(f"Unsupported jog axis: {axis}")
             result = require_ok(robot.move(f"MoveJog({axis})"))
-            result = {"motionPrep": prepare, **result}
+            return {"ok": True, "action": name, "result": result}
         elif name == "jogStop":
             robot.connect_motion()
             result = require_ok(robot.move("MoveJog()"))

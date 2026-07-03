@@ -1,0 +1,590 @@
+{
+  "session_start": "2026-06-08T21:12:11",
+  "row_count": 20,
+  "rows": [
+    {
+      "iter": 1,
+      "apply_outcome": "kept",
+      "primary_run_id": "20260608-211213-task",
+      "verify_run_id": "20260608-212000-task",
+      "before_agent_loop_s": 200.5,
+      "after_wall_s": 216.1,
+      "delta_wall_s": 15.6,
+      "before_wall_s_incl_reflect": 354.9,
+      "after_part_s": 216.1,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "强化Plan提示词约束：禁用run_python替代专用工具并强制hints JSON必填键",
+          "targets": [
+            "agent/prompts/plan_system_prompt.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 2,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-212343-task",
+      "verify_run_id": "20260608-213506-task",
+      "before_agent_loop_s": 281.1,
+      "after_wall_s": 278.4,
+      "delta_wall_s": -2.7,
+      "before_wall_s_incl_reflect": 456.0,
+      "after_part_s": 278.4,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "强化part0阶段工具白名单与执行顺序约束",
+          "targets": [
+            "agent/prompts/system_phase_part0.md",
+            "data/skills/pcb_assembly/part0_config.yaml"
+          ]
+        },
+        {
+          "title": "前置save_text_file的JSON Schema必填字段校验",
+          "targets": [
+            "agent/tools/save_text_file.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 3,
+      "apply_outcome": "skipped_inaccurate_pre_apply",
+      "primary_run_id": "20260608-213952-task",
+      "verify_run_id": null,
+      "before_agent_loop_s": 437.7,
+      "after_wall_s": null,
+      "delta_wall_s": null,
+      "before_wall_s_incl_reflect": 591.7,
+      "after_part_s": null,
+      "pixel_dist_px": null,
+      "pixel_ok": null,
+      "deliverable_valid": null,
+      "deliverable_reason": null,
+      "changes": [
+        {
+          "title": "增加PartB连续无工具调用步数安全阀",
+          "targets": [
+            "agent/core/execution_loop.py"
+          ]
+        },
+        {
+          "title": "约束Step1 save_text_file输出长度与格式",
+          "targets": [
+            "data/skills/pcb_assembly/save_text_file_prompt.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 4,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-214944-task",
+      "verify_run_id": "20260608-215907-task",
+      "before_agent_loop_s": 209.3,
+      "after_wall_s": 441.0,
+      "delta_wall_s": 231.7,
+      "before_wall_s_incl_reflect": 355.8,
+      "after_part_s": 441.0,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "为save_text_file添加强类型JSON Schema预校验",
+          "targets": [
+            "agent/tools/save_text_file.py"
+          ]
+        },
+        {
+          "title": "裁剪早期步骤与finish阶段的冗余上下文注入",
+          "targets": [
+            "agent/context/handoff.py",
+            "agent/prompts/finish_prompt.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 5,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-220636-task",
+      "verify_run_id": "20260608-221506-task",
+      "before_agent_loop_s": 220.3,
+      "after_wall_s": 286.3,
+      "delta_wall_s": 66.0,
+      "before_wall_s_incl_reflect": 386.9,
+      "after_part_s": 286.3,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "添加工具调用前置本地校验器拦截无效参数",
+          "targets": [
+            "agent/core/executor.py",
+            "agent/tools/validators.py"
+          ]
+        },
+        {
+          "title": "为 save_text_file 添加强制 JSON Schema 预校验与快速重试",
+          "targets": [
+            "agent/tools/file_ops.py",
+            "agent/schemas/tool_contracts.json"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 6,
+      "apply_outcome": "reverted_pixel",
+      "primary_run_id": "20260608-221959-task",
+      "verify_run_id": "20260608-223332-task",
+      "before_agent_loop_s": 394.4,
+      "after_wall_s": 182.7,
+      "delta_wall_s": -211.7,
+      "before_wall_s_incl_reflect": 560.6,
+      "after_part_s": 182.7,
+      "pixel_dist_px": null,
+      "pixel_ok": null,
+      "deliverable_valid": false,
+      "deliverable_reason": "step08_result.json not produced in this run",
+      "changes": [
+        {
+          "title": "Part0 连续无工具步安全熔断机制",
+          "targets": [
+            "agent/execution/step_loop.py",
+            "agent/config/loop_policy.yaml"
+          ]
+        },
+        {
+          "title": "Phase 切换时上下文强制结构化摘要",
+          "targets": [
+            "agent/context/phase_router.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 7,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-223640-task",
+      "verify_run_id": "20260608-224635-task",
+      "before_agent_loop_s": 228.9,
+      "after_wall_s": 275.7,
+      "delta_wall_s": 46.9,
+      "before_wall_s_incl_reflect": 393.4,
+      "after_part_s": 275.7,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "硬编码 part0 阶段工具白名单拦截非法路由",
+          "targets": [
+            "agent/routing/phase_router.py",
+            "agent/prompts/system_prompt.md"
+          ]
+        },
+        {
+          "title": "将 save_text_file JSON 契约前置至工具描述与 Phase 初始化提示",
+          "targets": [
+            "data/skills/tools/save_text_file.json",
+            "agent/prompts/phase_init_templates.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 8,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-225118-task",
+      "verify_run_id": "20260608-230039-task",
+      "before_agent_loop_s": 234.4,
+      "after_wall_s": 483.3,
+      "delta_wall_s": 249.0,
+      "before_wall_s_incl_reflect": 383.7,
+      "after_part_s": 483.3,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "Phase切换上下文压缩与冗余文件剔除",
+          "targets": [
+            "agent/context_manager.py"
+          ]
+        },
+        {
+          "title": "save_text_file 前置 JSON 键约束与防拦截",
+          "targets": [
+            "agent/prompts/system_prompt.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 9,
+      "apply_outcome": "skipped_inaccurate_pre_apply",
+      "primary_run_id": "20260608-230850-task",
+      "verify_run_id": null,
+      "before_agent_loop_s": 259.1,
+      "after_wall_s": null,
+      "delta_wall_s": null,
+      "before_wall_s_incl_reflect": 423.2,
+      "after_part_s": null,
+      "pixel_dist_px": null,
+      "pixel_ok": false,
+      "deliverable_valid": null,
+      "deliverable_reason": null,
+      "changes": [
+        {
+          "title": "引入强类型 hints 输出契约替代通用文本保存",
+          "targets": [
+            "agent/skills/vlm_hints_contract.yaml",
+            "agent/prompts/part0_system_instructions.md"
+          ]
+        },
+        {
+          "title": "强化 part0 阶段 Plan 约束与非法工具拦截",
+          "targets": [
+            "agent/plans/part0_assembly_plan.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 10,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-231553-task",
+      "verify_run_id": "20260608-232418-task",
+      "before_agent_loop_s": 220.9,
+      "after_wall_s": 268.4,
+      "delta_wall_s": 47.5,
+      "before_wall_s_incl_reflect": 398.3,
+      "after_part_s": 268.4,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "强化Part0工具白名单与save_text_file前置校验",
+          "targets": [
+            "agent/prompts/system_prompt.md",
+            "agent/tools/save_text_file.py"
+          ]
+        },
+        {
+          "title": "合并PartA连续save_text_file调用为单次写入",
+          "targets": [
+            "agent/policies/io_policy.yaml",
+            "agent/agents/board_hint_agent.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 11,
+      "apply_outcome": "reverted_pixel",
+      "primary_run_id": "20260608-232854-task",
+      "verify_run_id": "20260608-233830-task",
+      "before_agent_loop_s": 253.6,
+      "after_wall_s": 755.8,
+      "delta_wall_s": 502.1,
+      "before_wall_s_incl_reflect": 416.3,
+      "after_part_s": 755.8,
+      "pixel_dist_px": null,
+      "pixel_ok": null,
+      "deliverable_valid": false,
+      "deliverable_reason": "step08_result.json not produced in this run",
+      "changes": [
+        {
+          "title": "实施Phase切换时的上下文动态裁剪与Base64路径替换",
+          "targets": [
+            "agent/context_manager.py",
+            "agent/prompts/system_prompt.md"
+          ]
+        },
+        {
+          "title": "在System Prompt前置Plan-Guard负向示例与工具契约约束",
+          "targets": [
+            "agent/prompts/system_prompt.md",
+            "agent/skills/plan_guard_rules.yaml"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 12,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260608-235110-task",
+      "verify_run_id": "20260608-235941-task",
+      "before_agent_loop_s": 199.6,
+      "after_wall_s": 281.0,
+      "delta_wall_s": 81.5,
+      "before_wall_s_incl_reflect": 382.8,
+      "after_part_s": 281.0,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "为 save_text_file 添加强制 JSON Schema 预校验",
+          "targets": [
+            "agent/tools/save_text_file.py",
+            "agent/schemas/save_text_file_schema.json"
+          ]
+        },
+        {
+          "title": "Phase 切换时实施上下文动态裁剪策略",
+          "targets": [
+            "agent/core/context_manager.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 13,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260609-000427-task",
+      "verify_run_id": "20260609-001321-task",
+      "before_agent_loop_s": 235.0,
+      "after_wall_s": 262.4,
+      "delta_wall_s": 27.5,
+      "before_wall_s_incl_reflect": 392.9,
+      "after_part_s": 262.4,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "固化part0工具链并移除run_python权限",
+          "targets": [
+            "agent/skills/part0_workflow.yaml"
+          ]
+        },
+        {
+          "title": "为save_text_file注入JSON Schema强校验",
+          "targets": [
+            "agent/tools/save_text_file.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 14,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260609-001749-task",
+      "verify_run_id": "20260609-002639-task",
+      "before_agent_loop_s": 207.8,
+      "after_wall_s": 238.9,
+      "delta_wall_s": 31.1,
+      "before_wall_s_incl_reflect": 363.5,
+      "after_part_s": 238.9,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "修正 part0 阶段工具白名单与 save_text_file 必填字段约束",
+          "targets": [
+            "data/skills/plan_skills.yaml",
+            "agent/prompts/phase_constraints.md"
+          ]
+        },
+        {
+          "title": "为 save_text_file 启用 JSON Schema 响应格式与 max_tokens 限制",
+          "targets": [
+            "agent/tools/save_text_file.py",
+            "agent/config/tool_registry.json"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 15,
+      "apply_outcome": "kept",
+      "primary_run_id": "20260609-003043-task",
+      "verify_run_id": "20260609-003921-task",
+      "before_agent_loop_s": 220.7,
+      "after_wall_s": 214.8,
+      "delta_wall_s": -5.9,
+      "before_wall_s_incl_reflect": null,
+      "after_part_s": 214.8,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "强化 save_text_file JSON 必填字段约束与前置校验",
+          "targets": [
+            "agent/tools/save_text_file.py",
+            "agent/prompts/system_prompt.md"
+          ]
+        },
+        {
+          "title": "Phase 切换时过滤 handoff_artifacts 中的调试中间文件",
+          "targets": [
+            "agent/core/handoff_manager.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 16,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260609-004303-task",
+      "verify_run_id": "20260609-005428-task",
+      "before_agent_loop_s": 334.6,
+      "after_wall_s": 215.6,
+      "delta_wall_s": -119.0,
+      "before_wall_s_incl_reflect": null,
+      "after_part_s": 215.6,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "PartB阶段纯推理步数限制与视觉工具强制注入",
+          "targets": [
+            "agent/loop_controller.py"
+          ]
+        },
+        {
+          "title": "Phase Handoff 上下文动态裁剪与冗余数据剥离",
+          "targets": [
+            "agent/context_manager.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 17,
+      "apply_outcome": "reverted_pixel",
+      "primary_run_id": "20260609-005809-task",
+      "verify_run_id": "20260609-011225-task",
+      "before_agent_loop_s": 400.7,
+      "after_wall_s": 429.4,
+      "delta_wall_s": 28.7,
+      "before_wall_s_incl_reflect": 567.1,
+      "after_part_s": 429.4,
+      "pixel_dist_px": null,
+      "pixel_ok": null,
+      "deliverable_valid": false,
+      "deliverable_reason": "step08_result.json not produced in this run",
+      "changes": [
+        {
+          "title": "PartB连续无工具调用步数熔断机制",
+          "targets": [
+            "agent/core/orchestrator.py",
+            "agent/phase/manager.py"
+          ]
+        },
+        {
+          "title": "save_text_file调用前JSON Schema前置校验",
+          "targets": [
+            "agent/tools/file_ops.py",
+            "agent/validators/schema_hook.py"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 18,
+      "apply_outcome": "kept",
+      "primary_run_id": "20260609-011939-task",
+      "verify_run_id": "20260609-013011-task",
+      "before_agent_loop_s": 233.2,
+      "after_wall_s": 197.0,
+      "delta_wall_s": -36.2,
+      "before_wall_s_incl_reflect": null,
+      "after_part_s": 197.0,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "为 save_text_file 注入强类型 JSON Schema 与必填字段模板",
+          "targets": [
+            "agent/tools/save_text_file.py",
+            "agent/prompts/part_a_hints.md"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 19,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260609-013335-task",
+      "verify_run_id": "20260609-014443-task",
+      "before_agent_loop_s": 264.4,
+      "after_wall_s": 252.8,
+      "delta_wall_s": -11.6,
+      "before_wall_s_incl_reflect": null,
+      "after_part_s": 252.8,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "限制save_text_file输出长度并强制hint JSON Schema",
+          "targets": [
+            "agent/prompts/tools/save_text_file.md",
+            "data/skills/hint_output_schema.json"
+          ]
+        },
+        {
+          "title": "固化part0阶段PDF命中后直连mark_tp工具链",
+          "targets": [
+            "agent/workflows/part0_planning.md",
+            "agent/skills/pdf_search_chain.yaml"
+          ]
+        }
+      ]
+    },
+    {
+      "iter": 20,
+      "apply_outcome": "reverted_not_session_best",
+      "primary_run_id": "20260609-014901-task",
+      "verify_run_id": "20260609-015704-task",
+      "before_agent_loop_s": 242.3,
+      "after_wall_s": 300.7,
+      "delta_wall_s": 58.4,
+      "before_wall_s_incl_reflect": 401.6,
+      "after_part_s": 300.7,
+      "pixel_dist_px": 1.0,
+      "pixel_ok": true,
+      "deliverable_valid": true,
+      "deliverable_reason": "ok",
+      "changes": [
+        {
+          "title": "强化Plan-Guard前置规则与save_text_file字段约束",
+          "targets": [
+            "agent/prompts/system_prompt.md",
+            "data/skills/tool_contracts/save_text_file.json"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "scan_frames": 8,
+  "yolo": {
+    "enabled": true,
+    "model": "bg_fallback",
+    "conf_thresh": 0.25,
+    "detections": [],
+    "mask_area_px": 58410,
+    "method": "bg_fallback"
+  },
+  "background": {
+    "available": true,
+    "used": true,
+    "diff_threshold": 25,
+    "raw_diff_mean": 3.3,
+    "mask_area_px": 58410
+  },
+  "arm_exclusion": {
+    "enabled": false,
+    "mask_area_px": 0
+  },
+  "final": {
+    "method": "bg_fallback",
+    "mask_area_px": 58410,
+    "connected_components": 5,
+    "accepted_components": 5,
+    "rejected_components": []
+  },
+  "depth": {
+    "backend": "da3_onnx",
+    "model_name": "DA3-SMALL",
+    "model_path": "unknown",
+    "provider": "CPUExecutionProvider",
+    "process_res": 504,
+    "is_metric": false,
+    "used_for_control": false,
+    "residual": 0.016996864429063056,
+    "raw_min": 0.0,
+    "raw_max": 0.0,
+    "raw_mean": 0.0,
+    "table_depth_median": 0.0,
+    "depth_direction": "smaller_closer",
+    "has_colormap": true,
+    "obstacle_stats": [
+      {
+        "id": 1,
+        "area_px": 51700,
+        "depth_p50": 0.0,
+        "depth_p90": 0.0,
+        "relative_depth_signed": 0.0,
+        "relative_depth_abs": 0.0,
+        "depth_direction": "smaller_closer",
+        "depth_valid": true,
+        "source": "2d_mask_fallback"
+      },
+      {
+        "id": 2,
+        "area_px": 555,
+        "depth_p50": 0.0,
+        "depth_p90": 0.0,
+        "relative_depth_signed": 0.0,
+        "relative_depth_abs": 0.0,
+        "depth_direction": "smaller_closer",
+        "depth_valid": true,
+        "source": "2d_mask_fallback"
+      },
+      {
+        "id": 3,
+        "area_px": 4547,
+        "depth_p50": 0.0,
+        "depth_p90": 0.0,
+        "relative_depth_signed": 0.0,
+        "relative_depth_abs": 0.0,
+        "depth_direction": "smaller_closer",
+        "depth_valid": true,
+        "source": "2d_mask_fallback"
+      },
+      {
+        "id": 4,
+        "area_px": 666,
+        "depth_p50": 0.0,
+        "depth_p90": 0.0,
+        "relative_depth_signed": 0.0,
+        "relative_depth_abs": 0.0,
+        "depth_direction": "smaller_closer",
+        "depth_valid": true,
+        "source": "2d_mask_fallback"
+      },
+      {
+        "id": 5,
+        "area_px": 942,
+        "depth_p50": 0.0,
+        "depth_p90": 0.0,
+        "relative_depth_signed": 0.0,
+        "relative_depth_abs": 0.0,
+        "depth_direction": "smaller_closer",
+        "depth_valid": true,
+        "source": "2d_mask_fallback"
+      }
+    ]
+  },
+  "timestamp": "2026-06-30T10:37:33.625106",
+  "frame_shape": [
+    1440,
+    2560,
+    3
+  ],
+  "scan_dir": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\workspace\\perception_debug\\scan_20260630_103733"
+}

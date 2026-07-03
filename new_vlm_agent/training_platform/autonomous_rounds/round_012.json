@@ -1,0 +1,309 @@
+{
+  "iteration": 12,
+  "apply_outcome": "skipped_inaccurate_pre_apply",
+  "good_sha_before": "683d2316ed87aad50ee6d1f2a70ccb709ae7baae",
+  "good_sha_after": "683d2316ed87aad50ee6d1f2a70ccb709ae7baae",
+  "primary_run": {
+    "run_id": "20260630-161542-task",
+    "part_timing": {
+      "part0_s": 25.9797,
+      "partb_s": 23.5926,
+      "parta_s": 18.5042,
+      "partc_s": 0.0,
+      "partd_s": 13.866,
+      "unknown_s": 16.0257,
+      "total_s": 97.9682
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      1997,
+      1085
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        1997,
+        1085
+      ],
+      "dx": -41,
+      "dy": -29,
+      "distance_px": 50.2,
+      "within_tolerance": false,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 158913,
+        "completion_tokens": 3360,
+        "total_tokens": 162273,
+        "reasoning_tokens": 1650
+      },
+      "reflection": {
+        "prompt_tokens": 3793,
+        "completion_tokens": 5829,
+        "total_tokens": 9622,
+        "reasoning_tokens": 4625
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 3080,
+        "completion_tokens": 3259,
+        "total_tokens": 6339,
+        "reasoning_tokens": 2652
+      },
+      "combined": {
+        "prompt_tokens": 165786,
+        "completion_tokens": 12448,
+        "total_tokens": 178234,
+        "reasoning_tokens": 7277
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 16.0257,
+        "llm_s": 15.9917,
+        "tools_s": 0.0021,
+        "images_attach_s": 0.005,
+        "llm_est_prefill_s": 8.0573,
+        "llm_est_decode_s": 7.9333,
+        "prompt_tokens": 45674,
+        "completion_tokens": 357,
+        "total_tokens": 46031
+      },
+      {
+        "step": 1,
+        "tools": [
+          "search_pdf_text",
+          "mark_tp_on_assembly_from_pdf_hit",
+          "save_text_file"
+        ],
+        "step_total_s": 21.4488,
+        "llm_s": 19.7307,
+        "tools_s": 1.6747,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.7085,
+        "llm_est_decode_s": 17.0222,
+        "prompt_tokens": 48476,
+        "completion_tokens": 766,
+        "total_tokens": 49242
+      },
+      {
+        "step": 2,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 4.5309,
+        "llm_s": 4.5192,
+        "tools_s": 0.002,
+        "images_attach_s": 0.0031,
+        "llm_est_prefill_s": 1.697,
+        "llm_est_decode_s": 2.8222,
+        "prompt_tokens": 6689,
+        "completion_tokens": 127,
+        "total_tokens": 6816
+      },
+      {
+        "step": 3,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 12.7003,
+        "llm_s": 12.6923,
+        "tools_s": 0.003,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.159,
+        "llm_est_decode_s": 12.5333,
+        "prompt_tokens": 9444,
+        "completion_tokens": 564,
+        "total_tokens": 10008
+      },
+      {
+        "step": 4,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 4.3491,
+        "llm_s": 4.1242,
+        "tools_s": 0.2189,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.9019,
+        "llm_est_decode_s": 3.2222,
+        "prompt_tokens": 9733,
+        "completion_tokens": 145,
+        "total_tokens": 9878
+      },
+      {
+        "step": 5,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 6.5432,
+        "llm_s": 6.5297,
+        "tools_s": 0.0023,
+        "images_attach_s": 0.0066,
+        "llm_est_prefill_s": 2.263,
+        "llm_est_decode_s": 4.2667,
+        "prompt_tokens": 6774,
+        "completion_tokens": 192,
+        "total_tokens": 6966
+      },
+      {
+        "step": 6,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 12.1088,
+        "llm_s": 12.0907,
+        "tools_s": 0.004,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 12.0907,
+        "prompt_tokens": 9513,
+        "completion_tokens": 566,
+        "total_tokens": 10079
+      },
+      {
+        "step": 7,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 6.3954,
+        "llm_s": 6.0338,
+        "tools_s": 0.3465,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.6116,
+        "llm_est_decode_s": 4.4222,
+        "prompt_tokens": 9900,
+        "completion_tokens": 199,
+        "total_tokens": 10099
+      },
+      {
+        "step": 8,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 5.9173,
+        "llm_s": 4.1219,
+        "tools_s": 1.7911,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.6774,
+        "llm_est_decode_s": 3.4444,
+        "prompt_tokens": 6859,
+        "completion_tokens": 155,
+        "total_tokens": 7014
+      },
+      {
+        "step": 9,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 7.9487,
+        "llm_s": 7.9413,
+        "tools_s": 0.005,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.5191,
+        "llm_est_decode_s": 6.4222,
+        "prompt_tokens": 5851,
+        "completion_tokens": 289,
+        "total_tokens": 6140
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "工具契约",
+        "title": "为save_text_file添加强制结构化输出与Token限制",
+        "target_files": [
+          "agent/tools/save_text_file.py",
+          "data/skills/tool_contracts/save_text_file.yaml"
+        ],
+        "concrete_steps": [
+          "在 agent/tools/save_text_file.py 的 execute() 方法中注入 max_tokens=80 的 LLM 调用参数拦截逻辑",
+          "修改 data/skills/tool_contracts/save_text_file.yaml，将 output_schema 强制限定为 {\"path\": \"string\", \"content\": \"string\"} 并移除自由文本字段",
+          "在 agent/prompts/tool_usage_guidelines.md 中追加硬性规则：调用 save_text_file 前禁止输出任何自然语言解释，必须直接返回 JSON payload"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "压缩初始系统提示词并启用VLM图像Token降采样",
+        "target_files": [
+          "agent/prompts/system_prompt_base.md",
+          "agent/config/vlm_image_config.yaml"
+        ],
+        "concrete_steps": [
+          "编辑 agent/prompts/system_prompt_base.md，删除 Step 0/1 中冗余的视觉校验说明与重复定位指令，仅保留核心任务描述",
+          "修改 agent/config/vlm_image_config.yaml，将 max_image_tokens 设为 1024 并启用 resolution: medium 降采样策略",
+          "在 agent/context/context_assembler.py 的 build_phase_context() 函数中，添加对 handoff_artifacts 的白名单过滤逻辑，仅透传 _tp_marked.png 与 _largest_ic.json，剔除 _debug.* 中间文件"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": null,
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "工具契约",
+      "title": "为save_text_file添加强制结构化输出与Token限制",
+      "target_files": [
+        "agent/tools/save_text_file.py",
+        "data/skills/tool_contracts/save_text_file.yaml"
+      ],
+      "concrete_steps": [
+        "在 agent/tools/save_text_file.py 的 execute() 方法中注入 max_tokens=80 的 LLM 调用参数拦截逻辑",
+        "修改 data/skills/tool_contracts/save_text_file.yaml，将 output_schema 强制限定为 {\"path\": \"string\", \"content\": \"string\"} 并移除自由文本字段",
+        "在 agent/prompts/tool_usage_guidelines.md 中追加硬性规则：调用 save_text_file 前禁止输出任何自然语言解释，必须直接返回 JSON payload"
+      ],
+      "risk": "low"
+    },
+    {
+      "id": "A2",
+      "priority": "P0",
+      "category": "prompt体积",
+      "title": "压缩初始系统提示词并启用VLM图像Token降采样",
+      "target_files": [
+        "agent/prompts/system_prompt_base.md",
+        "agent/config/vlm_image_config.yaml"
+      ],
+      "concrete_steps": [
+        "编辑 agent/prompts/system_prompt_base.md，删除 Step 0/1 中冗余的视觉校验说明与重复定位指令，仅保留核心任务描述",
+        "修改 agent/config/vlm_image_config.yaml，将 max_image_tokens 设为 1024 并启用 resolution: medium 降采样策略",
+        "在 agent/context/context_assembler.py 的 build_phase_context() 函数中，添加对 handoff_artifacts 的白名单过滤逻辑，仅透传 _tp_marked.png 与 _largest_ic.json，剔除 _debug.* 中间文件"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": null,
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 165786,
+      "completion_tokens": 12448,
+      "total_tokens": 178234,
+      "reasoning_tokens": 7277
+    },
+    "qwen_verify_run": null,
+    "qwen_iteration_total": {
+      "prompt_tokens": 165786,
+      "completion_tokens": 12448,
+      "total_tokens": 178234
+    },
+    "cursor_apply": null
+  }
+}

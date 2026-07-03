@@ -1,0 +1,88 @@
+# Case 12（默认）：位号侧带绿圈 TP + 红框最大 IC；实物侧 **无红框** 整板照（如 PCBA_IMG.jpg）。
+# VLM **同时看两图 + 读 locator graph**，把位号红框大芯片 **对应到** 实物上那颗芯片，只输出 **实物侧 ref_ic 中心** + 定全局比例 *s*（显式标量 **或** 两框宽高比）；Python 算 *t* 并 **一次** `s·p+t` 映射全部锚点。
+# 备选（实物图带红框、全 OpenCV）：**`task_red_box_board.yaml`**。
+embed_workflow_in_prompt: false
+inputs:
+  workflow_doc: "__case12_no_standard_workflow__"
+  skills_doc: "../../skills/SKILL.md"
+  step02_locator_asset: case10_assembly_largest_ic_box.png
+  step02_board_asset: PCBA_IMG.jpg
+  user_measurement_question: |
+    （在 question 正文中补充具体要测的 TP / 信号；本字段可为占位。）
+  board_id: "case12-step02-graph-only"
+  engineer_note: |
+    **禁止旋转/镜像/透视矫正实物图与 Step2 底图**：`PCBA_IMG.jpg` 与 **`debug/step02_board_front_anchor.png`** 必须 **同一像素栅格**（含竖幅原图）。**勿**因 `SKILL.md`「横幅底图」等 case10 表述而自写 `cv2.rotate` / `transpose` / `PIL.Image.rotate` / `warpPerspective`；坐标一律在 **未旋转的** `step02_board_front_anchor.png` 上定义。
+    将 `INPUT_PATHS["step02_locator_asset"]` → `debug/step02_locator_front_anchor.png`；`step02_board_asset`（**PCBA_IMG.jpg**，须放在本 case 目录）→ `debug/step02_board_front_anchor.png`。
+    **B1（最多 5 轮 QC）**：整图 `view_image` 两帧 + `read_text_file` graph 后，**每轮**：VLM 更新 `case12_board_largest_ic_bbox_vlm.json` → **下一动** `annotate_image` 在实物图上画 **ref_ic 十字** → **`out_path`=`debug/case12_board_ref_ic_b1_qc_r{k}.png`（k=1..5）** → **下一动** `view_image` 同一路径；正文 **`B1_QC_PASS` / `B1_QC_REVISE`**；REVISE 且 k < 5 再开下一轮，否则以当前 JSON 结束 B1。**B2**：`run_align_locator_graph_to_board_ic_bbox_vlm`；**禁止**在 B1 JSON 里写各 `ref_1`… board 坐标。
+    若要用 **实物图上的红框** 做对齐，改跑 **`task_red_box_board.yaml`** 并按其中说明调用 `run_align_locator_graph_to_board_ic_bbox`。
+
+question: |
+  ## Task（case12 — Step2 整图锚点 + 无红框实物图 + VLM 双图大芯片对应 + 全图对位）
+
+  **顺序里程碑**：预备复制素材 → **A** 位号 graph → **B1** VLM 双图对应 + **至多 5 轮**（写 JSON → 实物图十字 QC PNG → `view_image` → PASS/REVISE）→ **B2** `run_align_locator_graph_to_board_ic_bbox_vlm` → **B3** 参考点微调 + refine + overlay → **C** Step3–8 / `finish`。
+
+  **不要**执行默认 `STANDARD_WORKFLOW` Part 0 / 全链 Part B；你已有 Step2 级素材。
+
+  ### 像素系与几何（case12 **硬约束**，覆盖 `SKILL.md` 中 case10 习惯表述）
+  - **本任务实物图不「归一横幅」**：即使 **`宽 < 高`**（竖幅），也 **保持原图方向**。**禁止**为「摆正」「转横图」对位号图、实物图、`debug/*` 中任意 PNG/JPG 做 **旋转、镜像、透视矫正**。
+  - **禁止**在 **`run_python`** / 任意脚本中使用：`cv2.rotate` / `cv2.transpose` / `cv2.flip`（几何意义）/ `PIL.Image.rotate` / `Image.transpose` / `warpAffine` / `warpPerspective` / 以及依赖 EXIF 的自动扶正（除非用户显式另给任务）。
+  - **仅允许**：`shutil.copyfile` / `cv2.imread`→`imwrite` **不改 shape**、矩形 **`crop_image`**、**`annotate_image`** 在原栅格上叠标。所有 B1/B2/B3/Step8 的 **`[x,y]`** 均相对于 **`step02_board_front_anchor.png` 当前磁盘像素的列×行**，与工程师打开的源文件一致。
+
+  ### 预备
+  1. 将 **`INPUT_PATHS["step02_locator_asset"]`**（`case10_assembly_largest_ic_box.png`，绿圈 TP + 红框大 IC）**原样复制**为 **`debug/step02_locator_front_anchor.png`**。
+  2. 将 **`INPUT_PATHS["step02_board_asset"]`**（**`PCBA_IMG.jpg`**，**无**丝印红框）**原样复制**为 **`debug/step02_board_front_anchor.png`**（**禁止**复制前/后 `rotate`；须与源文件 **同宽高**）。
+  3. 勿依赖 `step01_locator_front_anchor.png`（可不生成）。
+
+  ### A — 位号侧抽象图（OpenCV，与旧流程相同）
+  - `from case12_step02_graph import run_build_step02_locator_graph`
+  - `run_build_step02_locator_graph(Path(os.environ.get("WORKSPACE",".")))`
+  - **产出**：`debug/case12_step02_locator_graph.json`、`.png`。
+
+  ### B1 — VLM：两图视觉对应（位号红框芯片 ↔ 实物最大同构芯片）**+ 至多 5 轮「判点 → 落图 → 看图 → 修正」**
+
+  **开始前（只做一次）**
+  - **`view_image`**（须看全）：`debug/step02_locator_front_anchor.png`、`debug/step02_board_front_anchor.png`。
+  - **`read_text_file`**：`debug/case12_step02_locator_graph.json`（了解 `ref_ic`/周边 ref 拓扑；**不要**在 B1 里给每个 ref 单独估实物坐标）。
+
+  **每一轮 k（k = 1 … 5）固定节拍（禁止打乱顺序）**
+  1. **判定 / 更新 JSON**：根据当前信息（含上一轮 `view_image` 结论）写出或覆盖 **`debug/case12_board_largest_ic_bbox_vlm.json`**。首轮基于两整图 + graph；后续轮**仅**在 QC 发现问题时修正 **`ref_ic_center_board_px`**（以及必要时 **`isotropic_scale_locator_to_board`** 或 **`board_largest_ic_bbox_xyxy`**）。字段要求不变：
+     - **`coordinate_frame`**：`"step02_board_front_anchor.png"`
+     - **`ref_ic_center_board_px`**：`[x, y]`（**整板像素**，该颗大芯片几何中心；写入 JSON 后与本轮十字必须一致）。
+     - **定 *s*（二选一）**：**`isotropic_scale_locator_to_board`**（float）**或** **`board_largest_ic_bbox_xyxy`**（与位号 `largest_ic.bbox_roi` 推 *s*；***t* 仍由 ref_ic 中心锁定**）。
+     - 若同时给了显式 *s* 与 bbox，程序 **优先显式 *s***。
+     - 建议在本轮 **`notes_zh`** 或单独字段里记 **`b1_qc_round`** = k、简要说明本轮改过什么。
+  2. **下一动必须是 `annotate_image`**：**`path`** = **`debug/step02_board_front_anchor.png`**；**`points`**：**一条 crosshair**，`x`、`y` 为 JSON 里 **`ref_ic_center_board_px`** 的整数像素（四舍五入），`color` 建议 **`lime`** 或 **`cyan`**，`label`=`ref_ic_center`，**`radius`** 建议 **10–16** 便于目视；**`out_path`** = **`debug/case12_board_ref_ic_b1_qc_r{k}.png`**（**k 与本轮轮次一致**）。
+  3. **下一动必须是 `view_image`**：**`debug/case12_board_ref_ic_b1_qc_r{k}.png`**（与上一步同一 k）。
+  4. **正文裁决**：写 **`B1_QC_PASS`** 或 **`B1_QC_REVISE`**（对照十字是否落在你认定的大芯片中心；偏移则 REVISE）。
+     - **`B1_QC_PASS`**：结束 B1，进入 B2。
+     - **`B1_QC_REVISE`**：若 **k < 5**，下一轮 **k+1** 回到步骤 1；若 **k == 5**，在正文写明已用尽 5 轮，**以当前磁盘上的 JSON 为准** 进入 B2（或注明 `B1_QC_PASS_WITH_CAVEATS`）。
+
+  **禁止**
+  - 未执行「`save_text_file` → **同轮** `annotate_image` → **同轮** `view_image`」就写 **PASS**。
+  - **`view_image` 的 QC PNG** 与 **`case12_board_largest_ic_bbox_vlm.json`** 中的 **`ref_ic_center_board_px`** 不一致却宣称 PASS。
+  - 在 B1 JSON 里列出 `ref_1`… 的 board 坐标；后续 TP/ref 均由 **同一 *s,t*** 从位号图映射。
+
+  ### B2 — OpenCV：单一 *s,t* 映射整网 + 叠图
+  - **数学**：`p_board = s·p_loc + t`（无旋转）；*s*、*t* 来自 B1；**全部**锚点（含 TP）用同一式子，相对结构固定。
+  - **`run_python`**：
+    - `from pathlib import Path`
+    - `import os`
+    - `from case12_step02_graph import run_align_locator_graph_to_board_ic_bbox_vlm`
+    - `run_align_locator_graph_to_board_ic_bbox_vlm(Path(os.environ["WORKSPACE"]))`
+  - **产出**：`debug/case12_board_points_aligned.json`（`source` 为 `vlm_ic_correspondence_isotropic_align`）、`debug/case12_board_approx_overlay_opencv.png`。
+  - **CLI**：`python case12_step02_graph.py align-board`（默认 **`--mode vlm-bbox`**）。
+
+  ### B3 — VLM 微调参考点（必选，小位移）
+  - **`view_image`**：`case12_step02_locator_graph.png`、`case12_board_approx_overlay_opencv.png`，必要时 `step02_board_front_anchor.png`。
+  - **`save_text_file` → `debug/case12_board_points_vlm_refine.json`**（字段同 `case12_board_points_aligned.json`，同一套 `ref_id`）。
+  - **`run_python`**：`run_apply_vlm_refinement` 后 `run_write_board_approx_overlay`（默认写出 refine 后的 **`case12_board_approx_overlay.png`**）。
+  - B3 完成后建议 **`view_image`** 对比 **`case12_board_approx_overlay_opencv.png`** 与 **`case12_board_approx_overlay.png`**。
+
+  ### C — Step3–8
+  - **`run_step3_mapping`**：仍对 **`step02_locator_front_anchor.png`** 与 **`step02_board_front_anchor.png`**；**`mapping_method`**：`"case12_step02_anchor_match"`。
+  - 后续按 **`SKILL.md`**；**`finish`** 须满足 case12 门禁（含 `case12_board_largest_ic_bbox_vlm.json`、两份 overlay、refine 等）。
+
+  ### 禁止
+  - 禁止跳过 B3（除非仓库门禁临时放宽）。禁止手编 `pairwise_roi` 而不跑 `run_build_step02_locator_graph`。
+  - 禁止用 **`case10_dual_roi_layout`** 作为 `mapping_method`（会拉起 case10 全套门禁）。
+  - **再次强调**：禁止旋转/镜像/透视变换 **整图或 Step2 底图**（见上文「像素系与几何」）；勿套用 **`STANDARD_WORKFLOW` Part A** 里「竖图转横」类步骤。

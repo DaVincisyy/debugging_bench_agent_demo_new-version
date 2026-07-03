@@ -1,0 +1,273 @@
+{
+  "iteration": 7,
+  "apply_outcome": "reverted_not_session_best",
+  "good_sha_before": "0a23e95cb2c703cdb05350f16f19593b7d90af96",
+  "good_sha_after": "0a23e95cb2c703cdb05350f16f19593b7d90af96",
+  "primary_run": {
+    "run_id": "20260702-103832-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 17.5568,
+      "unknown_s": 0.0,
+      "total_s": 17.5568
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 9366,
+        "completion_tokens": 375,
+        "total_tokens": 9741,
+        "reasoning_tokens": 217
+      },
+      "reflection": {
+        "prompt_tokens": 1301,
+        "completion_tokens": 5106,
+        "total_tokens": 6407,
+        "reasoning_tokens": 4002
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 2016,
+        "completion_tokens": 2899,
+        "total_tokens": 4915,
+        "reasoning_tokens": 2348
+      },
+      "combined": {
+        "prompt_tokens": 12683,
+        "completion_tokens": 8380,
+        "total_tokens": 21063,
+        "reasoning_tokens": 6350
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 10.0132,
+        "llm_s": 9.3907,
+        "tools_s": 0.6201,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 6.3907,
+        "llm_est_decode_s": 3.0,
+        "prompt_tokens": 4259,
+        "completion_tokens": 135,
+        "total_tokens": 4394
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 7.5436,
+        "llm_s": 7.537,
+        "tools_s": 0.0036,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.2036,
+        "llm_est_decode_s": 5.3333,
+        "prompt_tokens": 5107,
+        "completion_tokens": 240,
+        "total_tokens": 5347
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "agent代码",
+        "title": "启用LLM客户端KV Cache复用参数",
+        "target_files": [
+          "agent/llm_client.py"
+        ],
+        "concrete_steps": [
+          "在 agent/llm_client.py 的 chat_completion 请求构造处，定位 payload 字典生成逻辑",
+          "注入 prompt_caching 或 cache_control 参数（例如 extra_body={'prompt_cache': True} 或对应推理服务的缓存开关）",
+          "将 system_prompt 与固定模板部分标记为 cache_control: {type: 'ephemeral'}，确保首字延迟降低",
+          "添加日志打印 cache_hit 状态，验证缓存生效且不影响原有请求结构"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "实施Step间上下文动态截断策略",
+        "target_files": [
+          "agent/prompt_builder.py"
+        ],
+        "concrete_steps": [
+          "在 agent/prompt_builder.py 的 assemble_history 函数中，引入 max_history_turns=1 配置项",
+          "修改消息过滤逻辑：仅保留最近一轮 tool_output 与关键坐标锚点，移除更早的 assistant/user 对话",
+          "增加 token 长度硬限制（如 3500 tokens），超出时从历史列表头部开始丢弃非关键文本",
+          "确保 system_prompt 完整保留，仅裁剪动态上下文，防止 Step1 Prompt 膨胀至 5000+ tokens"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260702-104302-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 11.7684,
+      "unknown_s": 0.0,
+      "total_s": 11.7684
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 9378,
+        "completion_tokens": 422,
+        "total_tokens": 9800,
+        "reasoning_tokens": 255
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 9378,
+        "completion_tokens": 422,
+        "total_tokens": 9800
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 5.3181,
+        "llm_s": 4.6883,
+        "tools_s": 0.6276,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.5327,
+        "llm_est_decode_s": 3.1556,
+        "prompt_tokens": 4267,
+        "completion_tokens": 142,
+        "total_tokens": 4409
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 6.4503,
+        "llm_s": 6.4425,
+        "tools_s": 0.0036,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.2203,
+        "llm_est_decode_s": 6.2222,
+        "prompt_tokens": 5111,
+        "completion_tokens": 280,
+        "total_tokens": 5391
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "agent代码",
+      "title": "启用LLM客户端KV Cache复用参数",
+      "target_files": [
+        "agent/llm_client.py"
+      ],
+      "concrete_steps": [
+        "在 agent/llm_client.py 的 chat_completion 请求构造处，定位 payload 字典生成逻辑",
+        "注入 prompt_caching 或 cache_control 参数（例如 extra_body={'prompt_cache': True} 或对应推理服务的缓存开关）",
+        "将 system_prompt 与固定模板部分标记为 cache_control: {type: 'ephemeral'}，确保首字延迟降低",
+        "添加日志打印 cache_hit 状态，验证缓存生效且不影响原有请求结构"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 73.32,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 12683,
+      "completion_tokens": 8380,
+      "total_tokens": 21063,
+      "reasoning_tokens": 6350
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 9378,
+      "completion_tokens": 422,
+      "total_tokens": 9800
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 22061,
+      "completion_tokens": 8802,
+      "total_tokens": 30863
+    },
+    "cursor_apply": {}
+  }
+}

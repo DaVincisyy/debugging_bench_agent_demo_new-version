@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-06-30T16:28:53.152343",
+  "scan_dir": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\workspace\\perception_debug\\scan_20260630_162852",
+  "obstacle_count": 1,
+  "obstacles": [
+    {
+      "x": 0.01545177203492046,
+      "y": -0.04034596546301076,
+      "radius_mm": 0.08555350972985537,
+      "height_mm": 0.07928079962730408,
+      "pixel_area": 227148,
+      "confidence": 0.990911299012049,
+      "obstacle_id": 0,
+      "source": "3d_reconstruction",
+      "depth_p50": 1.0258609056472778,
+      "depth_p90": 1.0731819868087769,
+      "table_depth_median": 0.9285947680473328,
+      "relative_depth_signed": 0.09726613759994507,
+      "relative_depth_abs": 0.09726613759994507,
+      "depth_direction": "larger_closer",
+      "depth_valid": true,
+      "risk": "tall_obstacle"
+    }
+  ]
+}

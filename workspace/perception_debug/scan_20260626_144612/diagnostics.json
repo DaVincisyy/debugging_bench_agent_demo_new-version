@@ -1,0 +1,36 @@
+{
+  "scan_frames": 8,
+  "yolo": {
+    "enabled": true,
+    "model": "bg_fallback",
+    "conf_thresh": 0.25,
+    "detections": [],
+    "mask_area_px": 5081,
+    "method": "bg_fallback"
+  },
+  "background": {
+    "available": true,
+    "used": true,
+    "diff_threshold": 25,
+    "raw_diff_mean": 4.18,
+    "mask_area_px": 5081
+  },
+  "arm_exclusion": {
+    "enabled": false,
+    "mask_area_px": 0
+  },
+  "final": {
+    "method": "bg_fallback",
+    "mask_area_px": 5081,
+    "connected_components": 2,
+    "accepted_components": 2,
+    "rejected_components": []
+  },
+  "timestamp": "2026-06-26T14:46:12.411696",
+  "frame_shape": [
+    480,
+    640,
+    3
+  ],
+  "scan_dir": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\workspace\\perception_debug\\scan_20260626_144612"
+}

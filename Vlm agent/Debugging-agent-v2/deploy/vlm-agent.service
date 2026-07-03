@@ -1,0 +1,27 @@
+[Unit]
+Description=VLM Agent Service for PCBA Debugging Bench
+After=network.target
+
+[Service]
+Type=simple
+User=vlm-agent
+WorkingDirectory=/opt/vlm-agent/Debugging-agent-v2
+EnvironmentFile=/opt/vlm-agent/Debugging-agent-v2/.env
+Environment=VLM_AGENT_SERVICE_PORT=8000
+Environment=VLM_AGENT_SERVICE_WORKERS=1
+ExecStart=/opt/vlm-agent/Debugging-agent-v2/.venv/bin/python -m uvicorn agent.service:app --host 0.0.0.0 --port 8000 --log-level info
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/vlm-agent/service.log
+StandardError=append:/var/log/vlm-agent/service-error.log
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/vlm-agent/Debugging-agent-v2/workspace
+ReadWritePaths=/opt/vlm-agent/Debugging-agent-v2/data/cases
+
+[Install]
+WantedBy=multi-user.target

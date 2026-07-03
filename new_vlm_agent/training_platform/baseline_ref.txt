@@ -1,0 +1,16 @@
+# baseline tag（基线 Git 引用）说明
+#
+# 含义：验证失败时，autonomous_loop 会用 git reset --hard 回退到这个 commit。
+#       初始值为「最后一次已知可用的代码」；每轮 verify 成功并 commit 后，good_sha 会前进。
+#
+# 如何设置：
+#   1. 在当前可用代码上打 tag（推荐）：
+#        git add -A && git commit -m "baseline before autonomous loop"
+#        git tag v1-baseline
+#   2. 把下面一行改成你的 tag / 分支 / commit（# 开头为注释）：
+#        v1-baseline
+#   3. 或用命令行覆盖：python training_platform/autonomous_loop.py --baseline-ref v1-baseline
+#
+# agent 基线（autonomous 失败回退目标；与 training_platform 增强可分离维护）
+# v2: Phase-1 debug trim + Part0 search→mark auto-chain + reflect/apply pipeline (2026-06-22)
+v2-baseline-20260622

@@ -1,0 +1,53 @@
+{
+  "run_id": "20260608-223332-task",
+  "timestamp": "2026-06-08T22:36:36.821441",
+  "tolerance_px": 10,
+  "deliverable_check": {
+    "valid": false,
+    "reason": "step08_result.json not produced in this run",
+    "stopped_reason": "exception:BadRequestError"
+  },
+  "pixel_comparison": null,
+  "file_comparisons": [
+    {
+      "status": "ok",
+      "golden_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh",
+        "schematic_section",
+        "related_components"
+      ],
+      "actual_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh",
+        "schematic_location"
+      ],
+      "size_match": false,
+      "file": "case10_signal_to_tp.json"
+    },
+    {
+      "file": "case10_assembly_vlm_hints.json",
+      "status": "actual_missing"
+    },
+    {
+      "file": "case10_assembly_largest_ic_box.png",
+      "status": "actual_missing"
+    },
+    {
+      "file": "case10_vlm_hints.json",
+      "status": "actual_missing"
+    },
+    {
+      "file": "case10_largest_ic_box.png",
+      "status": "actual_missing"
+    },
+    {
+      "file": "step08_result.json",
+      "status": "actual_missing"
+    }
+  ],
+  "overall_pass_within_tolerance": false,
+  "pixel_within_tolerance": false
+}

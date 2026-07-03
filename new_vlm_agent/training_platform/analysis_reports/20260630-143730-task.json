@@ -1,0 +1,116 @@
+{
+  "run_id": "20260630-143730-task",
+  "timestamp": "2026-06-30T14:39:03.374494",
+  "tolerance_px": 10,
+  "deliverable_check": {
+    "valid": true,
+    "reason": "ok",
+    "stopped_reason": "finish-tool-called"
+  },
+  "pixel_comparison": {
+    "status": "ok",
+    "golden": [
+      2038,
+      1114
+    ],
+    "actual": [
+      1992,
+      1391
+    ],
+    "dx": -46,
+    "dy": 277,
+    "distance": 280.8,
+    "within_tolerance": false,
+    "tolerance_px": 10,
+    "file": "step08_result.json"
+  },
+  "file_comparisons": [
+    {
+      "status": "ok",
+      "golden_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh",
+        "schematic_section",
+        "related_components"
+      ],
+      "actual_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh",
+        "schematic_section",
+        "related_components"
+      ],
+      "size_match": false,
+      "file": "case10_signal_to_tp.json"
+    },
+    {
+      "status": "ok",
+      "golden_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "relative_to_tp",
+        "visual_cues"
+      ],
+      "actual_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "relative_to_tp",
+        "visual_cues"
+      ],
+      "size_match": false,
+      "file": "case10_assembly_vlm_hints.json"
+    },
+    {
+      "status": "ok",
+      "golden_size": 1265207,
+      "actual_size": 910099,
+      "size_match": false,
+      "file": "case10_assembly_largest_ic_box.png"
+    },
+    {
+      "status": "ok",
+      "golden_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "visual_cues",
+        "opencv_ballpark"
+      ],
+      "actual_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "visual_cues",
+        "reference_text",
+        "opencv_ballpark"
+      ],
+      "size_match": false,
+      "file": "case10_vlm_hints.json"
+    },
+    {
+      "status": "ok",
+      "golden_size": 12325797,
+      "actual_size": 12339016,
+      "size_match": false,
+      "file": "case10_largest_ic_box.png"
+    },
+    {
+      "status": "ok",
+      "golden": [
+        2038,
+        1114
+      ],
+      "actual": [
+        1992,
+        1391
+      ],
+      "dx": -46,
+      "dy": 277,
+      "distance": 280.8,
+      "within_tolerance": false,
+      "tolerance_px": 10,
+      "file": "step08_result.json"
+    }
+  ],
+  "overall_pass_within_tolerance": false,
+  "pixel_within_tolerance": false
+}

@@ -1,0 +1,113 @@
+{
+  "scan_frames": 8,
+  "yolo": {
+    "enabled": true,
+    "status": "detected",
+    "model": "yolo_and_bg",
+    "conf_thresh": 0.1,
+    "detections": [
+      {
+        "class_id": 65,
+        "class": "class_65",
+        "confidence": 0.1813,
+        "bbox_xyxy": [
+          1344,
+          8,
+          1654,
+          865
+        ],
+        "mask_area_px": 235075
+      },
+      {
+        "class_id": 0,
+        "class": "class_0",
+        "confidence": 0.114,
+        "bbox_xyxy": [
+          2268,
+          913,
+          2558,
+          1231
+        ],
+        "mask_area_px": 235075
+      },
+      {
+        "class_id": 31,
+        "class": "class_31",
+        "confidence": 0.104,
+        "bbox_xyxy": [
+          1342,
+          5,
+          1654,
+          863
+        ],
+        "mask_area_px": 235075
+      }
+    ],
+    "yolo_raw_mask_area_px": 247600,
+    "error": null,
+    "mask_area_px": 235075,
+    "method": "yolo_and_bg"
+  },
+  "background": {
+    "available": true,
+    "computed": true,
+    "used_for_final": true,
+    "diff_threshold": 25,
+    "raw_diff_mean": 2.78,
+    "mask_area_px": 55679,
+    "used": true
+  },
+  "arm_exclusion": {
+    "enabled": false,
+    "mask_area_px": 102871,
+    "zones_count": -1
+  },
+  "final": {
+    "method": "yolo_and_bg",
+    "mask_area_px": 235075,
+    "connected_components": 3,
+    "yolo_only_area_px": 246704,
+    "bg_only_area_px": 54783,
+    "yolo_and_bg_area_px": 896,
+    "removed_by_arm_px": 0,
+    "accepted_components": 3,
+    "rejected_components": []
+  },
+  "depth": {
+    "backend": "DA3OnnxEstimator",
+    "model_name": "DA3-SMALL-504",
+    "model_path": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\models\\depth\\da3_onnx\\DA3-SMALL-504.onnx",
+    "provider": "CPUExecutionProvider",
+    "process_res": 504,
+    "is_metric": false,
+    "used_for_control": false,
+    "residual": 0.13685135543346405,
+    "raw_min": 0.5326899290084839,
+    "raw_max": 1.280632495880127,
+    "raw_mean": 0.9445154666900635,
+    "table_depth_median": 0.9366680383682251,
+    "depth_direction": "larger_closer",
+    "has_colormap": true,
+    "obstacle_stats": [
+      {
+        "id": 0,
+        "area_px": 235075,
+        "depth_p50": 0.9806378483772278,
+        "depth_p90": 1.0584907531738281,
+        "relative_depth_signed": 0.043969810009002686,
+        "relative_depth_abs": 0.043969810009002686,
+        "risk": "low_obstacle",
+        "depth_direction": "larger_closer",
+        "depth_valid": true,
+        "source": "3d_reconstruction"
+      }
+    ]
+  },
+  "timestamp": "2026-06-30T18:08:19.019139",
+  "frame_shape": [
+    1440,
+    2560,
+    3
+  ],
+  "scan_dir": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\workspace\\perception_debug\\scan_20260630_180818"
+}

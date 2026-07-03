@@ -1,0 +1,112 @@
+{
+  "run_id": "20260609-002639-task",
+  "timestamp": "2026-06-09T00:30:40.596163",
+  "tolerance_px": 10,
+  "deliverable_check": {
+    "valid": true,
+    "reason": "ok",
+    "stopped_reason": "finish-tool-called"
+  },
+  "pixel_comparison": {
+    "status": "ok",
+    "golden": [
+      2038,
+      1114
+    ],
+    "actual": [
+      2037,
+      1114
+    ],
+    "dx": -1,
+    "dy": 0,
+    "distance": 1.0,
+    "within_tolerance": true,
+    "tolerance_px": 10,
+    "file": "step08_result.json"
+  },
+  "file_comparisons": [
+    {
+      "status": "ok",
+      "golden_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh",
+        "schematic_section",
+        "related_components"
+      ],
+      "actual_keys": [
+        "user_measurement_question",
+        "tp_id_or_ref",
+        "evidence_zh"
+      ],
+      "size_match": false,
+      "file": "case10_signal_to_tp.json"
+    },
+    {
+      "status": "ok",
+      "golden_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "relative_to_tp",
+        "visual_cues"
+      ],
+      "actual_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "relative_to_tp",
+        "visual_cues"
+      ],
+      "size_match": false,
+      "file": "case10_assembly_vlm_hints.json"
+    },
+    {
+      "status": "ok",
+      "golden_size": 1265207,
+      "actual_size": 1271907,
+      "size_match": false,
+      "file": "case10_assembly_largest_ic_box.png"
+    },
+    {
+      "status": "ok",
+      "golden_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "visual_cues",
+        "opencv_ballpark"
+      ],
+      "actual_keys": [
+        "approx_bbox_norm",
+        "region_hint",
+        "opencv_ballpark"
+      ],
+      "size_match": false,
+      "file": "case10_vlm_hints.json"
+    },
+    {
+      "status": "ok",
+      "golden_size": 12325797,
+      "actual_size": 12325797,
+      "size_match": true,
+      "file": "case10_largest_ic_box.png"
+    },
+    {
+      "status": "ok",
+      "golden": [
+        2038,
+        1114
+      ],
+      "actual": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10,
+      "file": "step08_result.json"
+    }
+  ],
+  "overall_pass_within_tolerance": true,
+  "pixel_within_tolerance": true
+}

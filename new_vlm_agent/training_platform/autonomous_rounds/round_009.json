@@ -1,0 +1,253 @@
+{
+  "iteration": 9,
+  "apply_outcome": "kept",
+  "good_sha_before": "f26dc9c88d687cd5e30fe09c012564e717b141e7",
+  "good_sha_after": "7989da4a6a195c75bd062f83f7c49504b6254d6c",
+  "primary_run": {
+    "run_id": "20260702-104813-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 8.4735,
+      "unknown_s": 0.0,
+      "total_s": 8.4735
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 7080,
+        "completion_tokens": 320,
+        "total_tokens": 7400,
+        "reasoning_tokens": 185
+      },
+      "reflection": {
+        "prompt_tokens": 1299,
+        "completion_tokens": 5002,
+        "total_tokens": 6301,
+        "reasoning_tokens": 4061
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 1838,
+        "completion_tokens": 3324,
+        "total_tokens": 5162,
+        "reasoning_tokens": 2767
+      },
+      "combined": {
+        "prompt_tokens": 10217,
+        "completion_tokens": 8646,
+        "total_tokens": 18863,
+        "reasoning_tokens": 6828
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 4.6246,
+        "llm_s": 3.7641,
+        "tools_s": 0.8581,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.7863,
+        "llm_est_decode_s": 2.9778,
+        "prompt_tokens": 4259,
+        "completion_tokens": 134,
+        "total_tokens": 4393
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 3.8489,
+        "llm_s": 3.8376,
+        "tools_s": 0.0052,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 3.8376,
+        "prompt_tokens": 2821,
+        "completion_tokens": 186,
+        "total_tokens": 3007
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "agent代码",
+        "title": "优化LLM客户端配置以降低Decode延迟",
+        "target_files": [
+          "agent/llm_client.py"
+        ],
+        "concrete_steps": [
+          "在 `LLMClient.generate()` 方法中增加 `max_tokens=256` 参数限制，防止模型生成超出实际需要的 tokens。",
+          "将同步请求改为流式请求（`stream=True`），并在 `LLMClient` 内部实现异步迭代器，提前返回首字以降低 TTFT。",
+          "在配置文件中新增 `low_latency_route` 字段，优先路由至推理延迟更低的模型实例，并设置 `request_timeout=10`。"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "流程编排",
+        "title": "Step0独立计算工具改为并行执行",
+        "target_files": [
+          "agent/workflow/step0_runner.py"
+        ],
+        "concrete_steps": [
+          "定位 `execute_step0_pipeline()` 函数，将 `case12_build_and_align_from_step02_anchors` 与 `emit_step08_from_case12_aligned` 的串行 `await` 调用替换为 `asyncio.gather()`。",
+          "检查两个工具的输入参数，确认无强数据依赖后，将共享的 `step02_anchors` 数据提前加载至内存供并行任务读取。",
+          "在 `gather` 外层包裹 `try...except` 块，若任一工具抛出非致命异常，记录日志并降级为串行重试，确保主流程不中断。"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260702-105223-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 5.2256,
+      "unknown_s": 0.0,
+      "total_s": 5.2256
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 7084,
+        "completion_tokens": 118,
+        "total_tokens": 7202
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 7084,
+        "completion_tokens": 118,
+        "total_tokens": 7202
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 2.4575,
+        "llm_s": 1.728,
+        "tools_s": 0.7295,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.1942,
+        "llm_est_decode_s": 0.5333,
+        "prompt_tokens": 4261,
+        "completion_tokens": 24,
+        "total_tokens": 4285
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 2.7681,
+        "llm_s": 2.7572,
+        "tools_s": 0.005,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.6683,
+        "llm_est_decode_s": 2.0889,
+        "prompt_tokens": 2823,
+        "completion_tokens": 94,
+        "total_tokens": 2917
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 87.15,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 10217,
+      "completion_tokens": 8646,
+      "total_tokens": 18863,
+      "reasoning_tokens": 6828
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 7084,
+      "completion_tokens": 118,
+      "total_tokens": 7202
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 17301,
+      "completion_tokens": 8764,
+      "total_tokens": 26065
+    },
+    "cursor_apply": {}
+  }
+}

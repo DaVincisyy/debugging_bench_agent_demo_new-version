@@ -1,0 +1,74 @@
+{
+  "run_id": "20260630-113658-task",
+  "timestamp": "2026-06-30T11:37:21.874430",
+  "tolerance_px": 10,
+  "deliverable_check": {
+    "valid": true,
+    "reason": "ok",
+    "stopped_reason": "finish-tool-called"
+  },
+  "pixel_comparison": {
+    "status": "ok",
+    "golden": [
+      2038,
+      1114
+    ],
+    "actual": [
+      357,
+      276
+    ],
+    "dx": -1681,
+    "dy": -838,
+    "distance": 1878.3,
+    "within_tolerance": false,
+    "tolerance_px": 10,
+    "file": "step08_result.json"
+  },
+  "file_comparisons": [
+    {
+      "file": "case10_signal_to_tp.json",
+      "status": "actual_missing"
+    },
+    {
+      "file": "case10_assembly_vlm_hints.json",
+      "status": "actual_missing"
+    },
+    {
+      "status": "ok",
+      "golden_size": 1265207,
+      "actual_size": 667219,
+      "size_match": false,
+      "file": "case10_assembly_largest_ic_box.png"
+    },
+    {
+      "file": "case10_vlm_hints.json",
+      "status": "actual_missing"
+    },
+    {
+      "status": "ok",
+      "golden_size": 12325797,
+      "actual_size": 915740,
+      "size_match": false,
+      "file": "case10_largest_ic_box.png"
+    },
+    {
+      "status": "ok",
+      "golden": [
+        2038,
+        1114
+      ],
+      "actual": [
+        357,
+        276
+      ],
+      "dx": -1681,
+      "dy": -838,
+      "distance": 1878.3,
+      "within_tolerance": false,
+      "tolerance_px": 10,
+      "file": "step08_result.json"
+    }
+  ],
+  "overall_pass_within_tolerance": false,
+  "pixel_within_tolerance": false
+}

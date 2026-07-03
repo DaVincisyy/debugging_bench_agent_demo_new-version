@@ -1,0 +1,181 @@
+1. 根据上下文合并流程
+2. 合并工具使用
+3. 调试用的工具输出（给人看的东西）不要实时处理，事后处理
+4. finish阶段看一下做的什么，优化一下
+5. 优化系统prompt的内容
+HAVE DONE:
+1,2,4,5写进测试平台
+人工改动3和 images追加问题
+测试平台vlm反思和cursor信息对齐（给cursor提供更前期的反思文件）
+测试平台保留历史轮次的反思和改进记录
+A. 强烈同意可删或run内不写盘（改代码后）
+文件
+理由
+case10_target_tp_work_roi.png
+仅ROI调试；OpenCV可在内存完成
+case10_assembly_opencv_debug.png
+纯可视化；bbox已在JSON/stdout
+case10_assembly_opencv_mask.png
+同上，且会attach进VLM，最该先砍
+case10_opencv_debug.png
+PartA同上
+case10_thresh_debug.png
+PartA内部mask调试
+case12_step02_locator_graph.png
+graph可视化
+case12_board_approx_overlay_opencv.png
+对齐overlay可视化
+B. 你说「只要坐标」——方向对，但要改代码才能删PNG
+文件
+现状
+删之前要做什么
+case10_assembly_drawing_tp_marked.png
+PartB底图+ case12绿圈fallback
+写tp_center.json；PartB/case12改读JSON
+case10_assembly_largest_ic_box.png
+case12 copy成locator anchor，graph检红框
+case12改读 assembly_largest_ic.json 的 bbox，不必画红框
+case10_largest_ic_box.png
+case12 copy成board anchor，对齐检红框
+改读 largest_ic.json bbox
+step08_final_tp.png
+finish/deliverable门禁
+改finish契约只验 JSON；PNG事后生成
+C. 短期仍须保留（管线硬依赖）
+文件
+原因
+case10_signal_to_tp.json
+权威TP名
+case10_target_tp_pdf_search.json
+PDF hit
+case10_assembly_drawing.png
+mark OpenCV 的像素底图（或 page1复制）
+case10_assembly_vlm_hints.json / case10_vlm_hints.json
+OpenCV ROI输入
+case10_assembly_largest_ic.json / case10_largest_ic.json
+bbox结构化结果
+case12_step02_locator_graph.json
+ref拓扑
+case12_board_points_aligned.json
+对齐后TP板图坐标
+step08_result.json
+最终答案
+step03_mapping.json
+finish契约
+D. 额外一点
+即使不删PNG，也应先改：ToolResult.images不要把debug/mask/box三图attach回VLM——这比少写几个文件更省token/时间。
+Agent里有一条固定机制（agent/tools.py + agent/agent.py）：
+工具返回 ToolResult(text=..., images=[路径1, 路径2, ...])
+下一步LLM调用前，agent 会把 images 里的每一张图读成base64，做成image_url，追加一条user消息，大意是：「上一步工具产出了这些图，请查看并继续」
+轮次
+主跑run
+主跑用时
+verify run
+verify用时
+结果
+改动（P0/实际apply）
+1
+014735
+183.2s
+015538
+181.5s
+✅ 保留（git 8a3b794）
+agent/agent.py：plan-guard 前自动补全hints JSON缺失字段（region_hint 等）。
+2
+015845
+605.7s ⚠️
+—
+—
+异常（40步空转，PartB prefill 93s）
+P0：KV Cache /历史摘要截断；无verify配对
+3
+021131
+126.2s
+021905
+186.2s
+↩回滚
+约束 save_text_file 输出长度 + 结构化摘要（apply_plan 被 guard 拦截，Cursor 仍可能局部执行）
+4
+022215
+172.4s
+023107
+208.6s
+↩回滚（像素 148.9px）
+agent/agent.py：PartB/PartA 在 view_image 后自动写 hints（剥离 LLM save_text_file 步）+ max_tokens fallback
+5
+023439
+255.9s
+024308
+145.1s 🏆
+✅ 保留（git daabf45）
+agent/llm_client.py：当step含 save_text_file 时 cap max_tokens=300
+6
+024538
+212.1s
+—
+—
+↩主跑像素已 148.9px
+P0：PartB连续无工具步熔断+强制视觉工具
+7
+025202
+151.4s
+025949
+487.0s ⚠️
+↩回滚
+重构 save_text_file 为结构化参数接口
+8
+030800
+208.9s
+031559
+189.5s
+↩回滚（像素 153px）
+约束 save_text_file 输出格式与长度
+9
+031912
+166.6s
+032704
+158.0s
+↩回滚（未刷新 session best）
+为 save_text_file 加强 JSON Schema + token 上限
+10
+032946
+218.2s
+033742
+171.2s
+↩回滚
+压缩Step 0–2初始prompt /系统提示
+11
+034037
+128.8s
+035025
+275.9s
+↩回滚
+引入 save_json_artifact 替代 save_text_file
+12
+035505
+147.6s
+040457
+368.3s
+↩回滚（像素 46.8px）
+约束 save_text_file 仅输出结构化 JSON
+13
+041109
+127.1s
+041724
+155.3s
+↩回滚
+强化 save_text_file 契约 + max_tokens≤200
+14
+042003
+134.3s
+042916
+210.7s
+↩回滚
+绕过 LLM 文本生成，框架侧 json.dump 写文件
+15
+043250
+159.5s
+044034
+95.6s
+↩回滚（像素 1752.5px）
+save_text_file.py + llm_client.py：JSON 模式下也 cap max_tokens 并关闭 Qwen thinking

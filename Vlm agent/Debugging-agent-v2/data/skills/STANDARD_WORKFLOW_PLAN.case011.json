@@ -1,0 +1,67 @@
+{
+  "plan_id": "standard-workflow-case011-v1",
+  "order": ["part0", "partB", "partA", "partD"],
+  "steps": [
+    {
+      "step_id": "part0_signal_to_tp",
+      "title": "Part0-A infer target TP",
+      "objective": "Read user_measurement_question + schematic and write debug/case10_signal_to_tp.json with tp_id_or_ref.",
+      "allowed_tools": ["view_image", "read_text_file", "save_text_file", "search_pdf_text", "run_python", "list_files"],
+      "done_any_artifacts": ["debug/case10_signal_to_tp.json"],
+      "next_action_hint": "Write debug/case10_signal_to_tp.json first; do not touch PartB/PartA yet. Pitfalls: do not guess tp_id_or_ref from memory; ensure JSON keys are valid and file is actually written."
+    },
+    {
+      "step_id": "part0_pdf_search_and_mark",
+      "title": "Part0-B/C PDF search and TP green circle",
+      "objective": "Use tp_id_or_ref to search assembly_drawing_pdf, build case10_assembly_drawing.png from assembly_drawing_page1_png, then run OpenCV marking.",
+      "allowed_tools": ["search_pdf_text", "run_python", "mark_tp_on_assembly_from_pdf_hit", "view_image"],
+      "done_any_artifacts": [
+        "debug/case10_target_tp_pdf_search.json",
+        "debug/case10_assembly_drawing.png",
+        "debug/case10_target_tp_work_roi.png",
+        "debug/case10_assembly_drawing_tp_marked.png"
+      ],
+      "next_action_hint": "After search hit, use direct shortest chain only: immediately call mark_tp_on_assembly_from_pdf_hit (optionally pass assembly_png_path=INPUT_PATHS[assembly_drawing_page1_png]) to generate debug/case10_target_tp_work_roi.png and debug/case10_assembly_drawing_tp_marked.png; the tool will materialize debug/case10_assembly_drawing.png automatically. Do NOT insert intermediate read_text_file / list_files / copy run_python steps once search JSON exists."
+    },
+    {
+      "step_id": "partb_locator_largest_ic",
+      "title": "PartB largest IC on assembly drawing",
+      "objective": "First VLM gives approximate ROI for largest IC, then OpenCV searches largest IC only inside that ROI-expanded work region; case10_assembly_opencv_debug.png must visualize VLM ROI + work ROI + final bbox; finally draw red box on top of case10_assembly_drawing_tp_marked.png (green TP circle must remain visible).",
+      "allowed_tools": ["view_image", "save_text_file", "run_python", "detect_largest_ic_on_assembly_from_vlm_hint", "annotate_image", "read_text_file"],
+      "done_any_artifacts": [
+        "debug/case10_assembly_vlm_hints.json",
+        "debug/case10_assembly_opencv_debug.png",
+        "debug/case10_assembly_largest_ic_box.png",
+        "debug/case10_assembly_largest_ic.json"
+      ],
+      "next_action_hint": "PartB strict sequence: (1) MUST call view_image(debug/case10_assembly_drawing_tp_marked.png) first; immediately after this, write debug/case10_assembly_vlm_hints.json with required keys: approx_bbox_norm=[x1n,y1n,x2n,y2n] in [0,1] and x2>x1,y2>y1; plus at least one semantic coarse hint key (region_hint / relative_to_tp / visual_cues). Do NOT include vlm_roi or image_wh. (2) then call detect_largest_ic_on_assembly_from_vlm_hint(work_margin_ratio=0.2) to generate debug/case10_assembly_opencv_debug.png + debug/case10_assembly_largest_ic_box.png + debug/case10_assembly_largest_ic.json in one step. The tool hardcodes the known-good baseline: THRESH_BINARY_INV=180, MORPH_RECT 3x3, dilate=1, min_area>=5000, aspect ratio 0.5~1.5, rank by bbox area max. (3) keep PNG/JSON bbox consistent and include both green TP circle + red IC box in final image."
+    },
+    {
+      "step_id": "parta_board_largest_ic",
+      "title": "PartA largest IC on board photo",
+      "objective": "First VLM inspects the board image and gives approximate ROI, then OpenCV searches largest IC only inside that ROI-expanded work region on the native board frame (no rotate/flip back-and-forth).",
+      "allowed_tools": ["run_python", "detect_largest_ic_on_board_from_vlm_hint", "view_image", "save_text_file", "annotate_image", "read_text_file"],
+      "done_any_artifacts": [
+        "debug/case10_vlm_hints.json",
+        "debug/case10_opencv_debug.png",
+        "debug/case10_largest_ic_box.png",
+        "debug/case10_largest_ic.json"
+      ],
+      "next_action_hint": "PartA strict sequence: (1) use INPUT_PATHS.front_board_photo as board source (case_011 is PCBA_IMG.jpg) and keep the native frame unchanged; (2) MUST call view_image on that board image, then write ROI hints JSON (prefer debug/case10_vlm_hints.json, compatible with debug/case10_board_vlm_hints.json). Geometry must use approx_bbox_norm only; do NOT include vlm_roi or image_wh. For the successful 20260527-135827 method, include opencv_ballpark: prefer_hsv_dark_package=true, hsv_upper_v=60, morph_kernel_size=5, morph_dilate_iter=2, morph_erode_iter=1, aspect_ratio=[0.8,1.2], package_short_side_px=[200,1000], fallback THRESH_BINARY_INV around 60; (3) prefer deterministic tool detect_largest_ic_on_board_from_vlm_hint (default board_path points to INPUT_PATHS.front_board_photo) to produce debug/case10_opencv_debug.png + debug/case10_largest_ic_box.png + debug/case10_largest_ic.json in one step (work_margin_ratio=0.2). Fallback run_python only if tool fails; (4) no rotate/flip ping-pong; keep PNG/JSON bbox consistent."
+    },
+    {
+      "step_id": "partd_case12_align_and_finish",
+      "title": "PartD case12 align and final answer",
+      "objective": "Run case12 graph alignment, generate step08 outputs and finish.",
+      "allowed_tools": ["case12_build_and_align_from_step02_anchors", "emit_step08_from_case12_aligned", "run_python", "read_text_file", "annotate_image", "save_text_file", "finish", "view_image"],
+      "done_any_artifacts": [
+        "debug/case12_step02_locator_graph.json",
+        "debug/case12_step02_locator_graph.png",
+        "debug/case12_board_points_aligned.json",
+        "debug/step08_final_tp.png",
+        "debug/step08_result.json"
+      ],
+      "next_action_hint": "PartD direct chain must follow case12 reference-group implementation (no handwritten replacement JSON): (1) call case12_build_and_align_from_step02_anchors directly; pass case10 outputs as inputs when needed: locator_anchor_path=debug/case10_assembly_largest_ic_box.png and board_anchor_path=debug/case10_largest_ic_box.png (tool will normalize to step02 anchors internally); (2) once debug/case12_board_points_aligned.json exists, call emit_step08_from_case12_aligned to generate debug/step08_final_tp.png + debug/step08_result.json and write correct case12 mapping_method into debug/step03_mapping.json (opencv source => case12_step02_opencv_ic_align, vlm source => case12_step02_vlm_ic_align); (3) finish immediately. Do NOT call run_step3_mapping and do NOT use case10_dual_roi_layout in this workflow."
+    }
+  ]
+}

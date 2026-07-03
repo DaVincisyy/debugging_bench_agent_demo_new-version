@@ -1,0 +1,71 @@
+{
+  "scan_frames": 8,
+  "yolo": {
+    "enabled": true,
+    "status": "unknown",
+    "model": "bg_fallback",
+    "conf_thresh": 0.25,
+    "detections": [],
+    "yolo_raw_mask_area_px": 0,
+    "fallback_mask_area_px": 0,
+    "final_mask_area_px": 0,
+    "error": null,
+    "mask_area_px": 0,
+    "method": "bg_fallback"
+  },
+  "background": {
+    "available": true,
+    "used": true,
+    "diff_threshold": 25,
+    "raw_diff_mean": 2.56,
+    "mask_area_px": 52080
+  },
+  "arm_exclusion": {
+    "enabled": false,
+    "mask_area_px": 0
+  },
+  "final": {
+    "method": "bg_fallback",
+    "mask_area_px": 52080,
+    "connected_components": 2,
+    "accepted_components": 2,
+    "rejected_components": []
+  },
+  "depth": {
+    "backend": "DA3OnnxEstimator",
+    "model_name": "DA3-SMALL-504",
+    "model_path": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\models\\depth\\da3_onnx\\DA3-SMALL-504.onnx",
+    "provider": "CPUExecutionProvider",
+    "process_res": 504,
+    "is_metric": false,
+    "used_for_control": false,
+    "residual": 0.19460263848304749,
+    "raw_min": 0.4384501576423645,
+    "raw_max": 1.4566518068313599,
+    "raw_mean": 0.9449114203453064,
+    "table_depth_median": 0.9980607032775879,
+    "depth_direction": "larger_closer",
+    "has_colormap": true,
+    "obstacle_stats": [
+      {
+        "id": 0,
+        "area_px": 52080,
+        "depth_p50": 0.5860646963119507,
+        "depth_p90": 0.6024501919746399,
+        "relative_depth_signed": -0.4119960069656372,
+        "relative_depth_abs": 0.4119960069656372,
+        "risk": "tall_obstacle",
+        "depth_direction": "larger_closer",
+        "depth_valid": true,
+        "source": "3d_reconstruction"
+      }
+    ]
+  },
+  "timestamp": "2026-06-30T14:30:53.530345",
+  "frame_shape": [
+    1440,
+    2560,
+    3
+  ],
+  "scan_dir": "C:\\Users\\FX506L\\OneDrive\\文档\\Kpit Debugging Agent\\workspace\\perception_debug\\scan_20260630_143053"
+}

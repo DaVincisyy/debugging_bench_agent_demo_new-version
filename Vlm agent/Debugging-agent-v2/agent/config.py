@@ -43,6 +43,11 @@ class Config:
     # long multimodal runs against ~50MB gateways).
     context_image_max_bytes: int = 40 * 1024 * 1024
     context_image_keep_last: int = 2
+    context_keep_recent_turns: int = 18
+    context_drop_initial_after_step: int = 0
+    context_tool_text_max_chars: int = 700
+    context_phase_summary_max_lines: int = 8
+    hierarchical_agent_mode: bool = True
 
     # --- optional "thinking / reasoning" controls -------------------- #
     # Some providers (e.g. DeepSeek V4) run a hidden chain-of-thought
@@ -127,7 +132,7 @@ def load_config(env_path: str | os.PathLike[str] | None = None,
         use_native_tools=_as_bool(pick("VLM_USE_NATIVE_TOOLS"), True),
         temperature=float(pick("VLM_TEMPERATURE", 0.2)),
         max_tokens=int(pick("VLM_MAX_TOKENS", 2048)),
-        max_steps=int(overrides.get("max_steps", pick("VLM_AGENT_MAX_STEPS", 80))),
+        max_steps=int(overrides.get("max_steps", 80)),
         workspace_dir=Path(overrides.get("workspace_dir", "workspace")),
         workflow_mode=wf_mode,
         enable_thinking=_as_bool(pick("VLM_ENABLE_THINKING"), False),
@@ -140,6 +145,17 @@ def load_config(env_path: str | os.PathLike[str] | None = None,
             pick("VLM_CONTEXT_IMAGE_MAX_BYTES", 40 * 1024 * 1024)
         ),
         context_image_keep_last=int(pick("VLM_CONTEXT_IMAGE_KEEP_LAST", 2)),
+        context_keep_recent_turns=int(pick("VLM_CONTEXT_KEEP_RECENT_TURNS", 18)),
+        context_drop_initial_after_step=int(
+            pick("VLM_CONTEXT_DROP_INITIAL_AFTER_STEP", 0)
+        ),
+        context_tool_text_max_chars=int(
+            pick("VLM_CONTEXT_TOOL_TEXT_MAX_CHARS", 700)
+        ),
+        context_phase_summary_max_lines=int(
+            pick("VLM_CONTEXT_PHASE_SUMMARY_MAX_LINES", 8)
+        ),
+        hierarchical_agent_mode=_as_bool(pick("VLM_HIERARCHICAL_AGENT_MODE"), True),
     )
 
 
@@ -184,10 +200,9 @@ def compose_agent_question(task: dict[str, Any]) -> str:
     if not path.is_file():
         return base
 
-    body = strip_workflow_doc_preamble(path.read_text(encoding="utf-8"))
-    # Short case question first, then binding constraints, then full workflow.
+    # Only include hard constraints — skip full STANDARD_WORKFLOW.md to keep prompt lean.
     return "\n\n".join(
-        p for p in (base, WORKFLOW_PROMPT_HARD_CONSTRAINTS_ZH, body) if p
+        p for p in (base, WORKFLOW_PROMPT_HARD_CONSTRAINTS_ZH) if p
     )
 
 

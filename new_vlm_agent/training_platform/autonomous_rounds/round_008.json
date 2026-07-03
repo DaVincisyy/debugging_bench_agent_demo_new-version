@@ -1,0 +1,256 @@
+{
+  "iteration": 8,
+  "apply_outcome": "kept",
+  "good_sha_before": "0a23e95cb2c703cdb05350f16f19593b7d90af96",
+  "good_sha_after": "f26dc9c88d687cd5e30fe09c012564e717b141e7",
+  "primary_run": {
+    "run_id": "20260702-104316-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 12.2577,
+      "unknown_s": 0.0,
+      "total_s": 12.2577
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 9366,
+        "completion_tokens": 480,
+        "total_tokens": 9846,
+        "reasoning_tokens": 320
+      },
+      "reflection": {
+        "prompt_tokens": 1299,
+        "completion_tokens": 5227,
+        "total_tokens": 6526,
+        "reasoning_tokens": 4129
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 1999,
+        "completion_tokens": 4026,
+        "total_tokens": 6025,
+        "reasoning_tokens": 3379
+      },
+      "combined": {
+        "prompt_tokens": 12664,
+        "completion_tokens": 9733,
+        "total_tokens": 22397,
+        "reasoning_tokens": 7508
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 5.6817,
+        "llm_s": 4.9214,
+        "tools_s": 0.7583,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.6981,
+        "llm_est_decode_s": 3.2222,
+        "prompt_tokens": 4259,
+        "completion_tokens": 145,
+        "total_tokens": 4404
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 6.576,
+        "llm_s": 6.5664,
+        "tools_s": 0.0043,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 6.5664,
+        "prompt_tokens": 5107,
+        "completion_tokens": 335,
+        "total_tokens": 5442
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "压缩finish步骤上下文并注入极简输出指令",
+        "target_files": [
+          "agent/prompts/finish_system.md",
+          "agent/core/context_manager.py"
+        ],
+        "concrete_steps": [
+          "在 agent/prompts/finish_system.md 末尾追加系统级约束：仅输出标准JSON坐标对象，严禁任何解释性文本、Markdown包装或额外字段。",
+          "在 agent/core/context_manager.py 的 build_next_turn_context 方法中，增加对上一轮工具返回值的过滤逻辑：仅保留 aligned_coords 与 confidence 字段，自动截断 debug_logs 与 raw_image_base64，确保注入下一轮的 prompt 增量严格控制在 200 tokens 以内。",
+          "运行本地单元测试验证 finish 步骤的 completion_tokens 降至 50 以下，且核心坐标解析逻辑不受影响。"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "工具契约",
+        "title": "精简对齐工具返回Schema剔除冗余调试字段",
+        "target_files": [
+          "agent/tools/case12_build_and_align_from_step02_anchors.py",
+          "agent/tools/emit_step08_from_case12_aligned.py"
+        ],
+        "concrete_steps": [
+          "修改 agent/tools/case12_build_and_align_from_step02_anchors.py 的 execute 函数返回值结构，移除 intermediate_debug_info 与 full_log_trace 字段，仅保留 anchors、aligned_params 和 status。",
+          "在 agent/tools/emit_step08_from_case12_aligned.py 中将返回字典的 verbose_output 键值默认设为 null，确保下游 finish 步骤仅接收结构化对齐参数。",
+          "同步更新 agent/tools/registry.json 中的对应 JSON Schema 定义，移除已废弃字段声明，防止 LLM 在解析时生成冗余 token。"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260702-104800-task",
+    "part_timing": {
+      "part0_s": 0.0,
+      "partb_s": 0.0,
+      "parta_s": 0.0,
+      "partc_s": 0.0,
+      "partd_s": 9.1433,
+      "unknown_s": 0.0,
+      "total_s": 9.1433
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      357,
+      276
+    ],
+    "golden_pixel": [
+      357,
+      276
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        357,
+        276
+      ],
+      "actual_pixel": [
+        357,
+        276
+      ],
+      "dx": 0,
+      "dy": 0,
+      "distance_px": 0.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 7080,
+        "completion_tokens": 317,
+        "total_tokens": 7397,
+        "reasoning_tokens": 180
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 7080,
+        "completion_tokens": 317,
+        "total_tokens": 7397
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 4.7178,
+        "llm_s": 3.8878,
+        "tools_s": 0.8265,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.8878,
+        "llm_est_decode_s": 3.0,
+        "prompt_tokens": 4259,
+        "completion_tokens": 135,
+        "total_tokens": 4394
+      },
+      {
+        "step": 1,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 4.4255,
+        "llm_s": 4.4183,
+        "tools_s": 0.0039,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.3738,
+        "llm_est_decode_s": 4.0444,
+        "prompt_tokens": 2821,
+        "completion_tokens": 182,
+        "total_tokens": 3003
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 100.96,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 12664,
+      "completion_tokens": 9733,
+      "total_tokens": 22397,
+      "reasoning_tokens": 7508
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 7080,
+      "completion_tokens": 317,
+      "total_tokens": 7397
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 19744,
+      "completion_tokens": 10050,
+      "total_tokens": 29794
+    },
+    "cursor_apply": {}
+  }
+}

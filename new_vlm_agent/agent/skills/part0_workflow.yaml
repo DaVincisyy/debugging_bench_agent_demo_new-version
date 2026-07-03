@@ -1,0 +1,42 @@
+# Part0 workflow skill — fixed tool chain (run_python removed)
+phase: part0
+description: Schematic → signal JSON → assembly PDF search → green-circle TP mark
+
+allowed_tools:
+  - view_image
+  - save_text_file
+  - search_pdf_text
+  - mark_tp_on_assembly_from_pdf_hit
+
+blocked_tools:
+  - run_python
+  - read_text_file
+  - list_files
+  - pdf_page_to_image
+
+tool_nodes:
+  view_image:
+    step: 0
+    description: Inspect schematic / user-question evidence before any JSON write
+  save_text_file:
+    step: 0
+    description: Write debug/case10_signal_to_tp.json
+    artifact: debug/case10_signal_to_tp.json
+  search_pdf_text:
+    step: 1
+    description: Search assembly_drawing_pdf using tp_id_or_ref from signal JSON
+    artifact: debug/case10_target_tp_pdf_search.json
+    next_step: mark_tp_on_assembly_from_pdf_hit
+  mark_tp_on_assembly_from_pdf_hit:
+    step: 2
+    description: Map PDF hit to assembly PNG pixels and draw green TP circle
+    artifacts:
+      - debug/case10_assembly_drawing.png
+      - debug/case10_assembly_drawing_tp_marked.png
+
+whitelist_intercept:
+  enabled: true
+  reject_blocked: true
+  reject_not_in_allowed: true
+  enforce_next_step:
+    search_pdf_text: mark_tp_on_assembly_from_pdf_hit

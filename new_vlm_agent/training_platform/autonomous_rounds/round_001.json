@@ -1,0 +1,658 @@
+{
+  "iteration": 1,
+  "apply_outcome": "kept",
+  "good_sha_before": "43b01890a7f82dd1a55d45f906f6c5669e8d0b11",
+  "good_sha_after": "a98d4a8eb27e9869aada94f3624c4a8e3a7e3aff",
+  "primary_run": {
+    "run_id": "20260608-211213-task",
+    "part_timing": {
+      "part0_s": 67.0726,
+      "partb_s": 28.7423,
+      "parta_s": 42.1732,
+      "partc_s": 0.0,
+      "partd_s": 46.5517,
+      "unknown_s": 15.9661,
+      "total_s": 200.5059
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 336296,
+        "completion_tokens": 6731,
+        "total_tokens": 343027,
+        "reasoning_tokens": 4519
+      },
+      "reflection": {
+        "prompt_tokens": 4736,
+        "completion_tokens": 5173,
+        "total_tokens": 9909,
+        "reasoning_tokens": 4154
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 2902,
+        "completion_tokens": 3058,
+        "total_tokens": 5960,
+        "reasoning_tokens": 2759
+      },
+      "combined": {
+        "prompt_tokens": 343934,
+        "completion_tokens": 14962,
+        "total_tokens": 358896,
+        "reasoning_tokens": 6913
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 15.9661,
+        "llm_s": 15.9139,
+        "tools_s": 0.002,
+        "images_attach_s": 0.0092,
+        "llm_est_prefill_s": 6.4906,
+        "llm_est_decode_s": 9.4222,
+        "prompt_tokens": 45209,
+        "completion_tokens": 424,
+        "total_tokens": 45633
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 14.608,
+        "llm_s": 14.5375,
+        "tools_s": 0.0087,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 4.4264,
+        "llm_est_decode_s": 10.1111,
+        "prompt_tokens": 48028,
+        "completion_tokens": 455,
+        "total_tokens": 48483
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 10.3763,
+        "llm_s": 8.5978,
+        "tools_s": 1.7179,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 5.1756,
+        "llm_est_decode_s": 3.4222,
+        "prompt_tokens": 48465,
+        "completion_tokens": 154,
+        "total_tokens": 48619
+      },
+      {
+        "step": 3,
+        "tools": [
+          "run_python"
+        ],
+        "step_total_s": 14.771,
+        "llm_s": 14.6924,
+        "tools_s": 0.0054,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 4.7369,
+        "llm_est_decode_s": 9.9556,
+        "prompt_tokens": 48684,
+        "completion_tokens": 448,
+        "total_tokens": 49132
+      },
+      {
+        "step": 4,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 15.7542,
+        "llm_s": 15.3847,
+        "tools_s": 0.3,
+        "images_attach_s": 0.0076,
+        "llm_est_prefill_s": 4.4514,
+        "llm_est_decode_s": 10.9333,
+        "prompt_tokens": 48954,
+        "completion_tokens": 492,
+        "total_tokens": 49446
+      },
+      {
+        "step": 5,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 11.5631,
+        "llm_s": 11.5364,
+        "tools_s": 0.0051,
+        "images_attach_s": 0.0113,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 11.5364,
+        "prompt_tokens": 6856,
+        "completion_tokens": 594,
+        "total_tokens": 7450
+      },
+      {
+        "step": 6,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 13.2192,
+        "llm_s": 13.1917,
+        "tools_s": 0.0083,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.7685,
+        "llm_est_decode_s": 12.4222,
+        "prompt_tokens": 9598,
+        "completion_tokens": 559,
+        "total_tokens": 10157
+      },
+      {
+        "step": 7,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 9.3799,
+        "llm_s": 9.0188,
+        "tools_s": 0.3331,
+        "images_attach_s": 0.0122,
+        "llm_est_prefill_s": 1.0632,
+        "llm_est_decode_s": 7.9556,
+        "prompt_tokens": 9825,
+        "completion_tokens": 358,
+        "total_tokens": 10183
+      },
+      {
+        "step": 8,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 6.1432,
+        "llm_s": 6.1089,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0175,
+        "llm_est_prefill_s": 1.0644,
+        "llm_est_decode_s": 5.0444,
+        "prompt_tokens": 6916,
+        "completion_tokens": 227,
+        "total_tokens": 7143
+      },
+      {
+        "step": 9,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 15.7346,
+        "llm_s": 15.697,
+        "tools_s": 0.003,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.3192,
+        "llm_est_decode_s": 15.3778,
+        "prompt_tokens": 9648,
+        "completion_tokens": 692,
+        "total_tokens": 10340
+      },
+      {
+        "step": 10,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 16.7851,
+        "llm_s": 16.7531,
+        "tools_s": 0.0076,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.3976,
+        "llm_est_decode_s": 15.3556,
+        "prompt_tokens": 9905,
+        "completion_tokens": 691,
+        "total_tokens": 10596
+      },
+      {
+        "step": 11,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 9.6535,
+        "llm_s": 8.4324,
+        "tools_s": 1.0299,
+        "images_attach_s": 0.1251,
+        "llm_est_prefill_s": 0.5435,
+        "llm_est_decode_s": 7.8889,
+        "prompt_tokens": 10250,
+        "completion_tokens": 355,
+        "total_tokens": 10605
+      },
+      {
+        "step": 12,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 10.3759,
+        "llm_s": 8.5086,
+        "tools_s": 1.7761,
+        "images_attach_s": 0.0694,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 8.5086,
+        "prompt_tokens": 6877,
+        "completion_tokens": 429,
+        "total_tokens": 7306
+      },
+      {
+        "step": 13,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 17.1286,
+        "llm_s": 15.36,
+        "tools_s": 1.5907,
+        "images_attach_s": 0.0538,
+        "llm_est_prefill_s": 6.36,
+        "llm_est_decode_s": 9.0,
+        "prompt_tokens": 12258,
+        "completion_tokens": 405,
+        "total_tokens": 12663
+      },
+      {
+        "step": 14,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 19.0472,
+        "llm_s": 18.773,
+        "tools_s": 0.0171,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 8.8161,
+        "llm_est_decode_s": 9.9556,
+        "prompt_tokens": 14823,
+        "completion_tokens": 448,
+        "total_tokens": 15271
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "plan技能",
+        "title": "强化Plan提示词约束：禁用run_python替代专用工具并强制hints JSON必填键",
+        "target_files": [
+          "agent/prompts/plan_system_prompt.md"
+        ],
+        "concrete_steps": [
+          "在 agent/prompts/plan_system_prompt.md 的 Tool Selection 规则区块顶部插入硬性约束：'禁止使用 run_python 执行装配图标记或坐标提取，必须调用 mark_tp_on_assembly_from_pdf_hit。'",
+          "在 Output Format 区块追加 JSON 结构校验指令：'生成 hints JSON 时，必须包含 region_hint、visual_cues 或 reference_text 至少一个字段，缺失则视为格式错误并重试。'",
+          "验证修改后的 prompt 长度未超过 4000 tokens，确保不影响预填充性能。"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260608-212000-task",
+    "part_timing": {
+      "part0_s": 64.5523,
+      "partb_s": 34.4762,
+      "parta_s": 46.369,
+      "partc_s": 0.0,
+      "partd_s": 54.2091,
+      "unknown_s": 16.5213,
+      "total_s": 216.1279
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 385794,
+        "completion_tokens": 6815,
+        "total_tokens": 392609,
+        "reasoning_tokens": 4528
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 385794,
+        "completion_tokens": 6815,
+        "total_tokens": 392609
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 16.5213,
+        "llm_s": 16.4584,
+        "tools_s": 0.0032,
+        "images_attach_s": 0.0148,
+        "llm_est_prefill_s": 4.5695,
+        "llm_est_decode_s": 11.8889,
+        "prompt_tokens": 45209,
+        "completion_tokens": 535,
+        "total_tokens": 45744
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 15.3355,
+        "llm_s": 15.2435,
+        "tools_s": 0.0073,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.3101,
+        "llm_est_decode_s": 12.9333,
+        "prompt_tokens": 48024,
+        "completion_tokens": 582,
+        "total_tokens": 48606
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 8.9726,
+        "llm_s": 7.103,
+        "tools_s": 1.8084,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.8808,
+        "llm_est_decode_s": 3.2222,
+        "prompt_tokens": 48566,
+        "completion_tokens": 145,
+        "total_tokens": 48711
+      },
+      {
+        "step": 3,
+        "tools": [
+          "run_python"
+        ],
+        "step_total_s": 12.4093,
+        "llm_s": 12.3443,
+        "tools_s": 0.0052,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.0554,
+        "llm_est_decode_s": 9.2889,
+        "prompt_tokens": 48787,
+        "completion_tokens": 418,
+        "total_tokens": 49205
+      },
+      {
+        "step": 4,
+        "tools": [
+          "read_text_file"
+        ],
+        "step_total_s": 9.2235,
+        "llm_s": 9.1362,
+        "tools_s": 0.0022,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 7.4473,
+        "llm_est_decode_s": 1.6889,
+        "prompt_tokens": 49064,
+        "completion_tokens": 76,
+        "total_tokens": 49140
+      },
+      {
+        "step": 5,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 14.5953,
+        "llm_s": 14.2244,
+        "tools_s": 0.2967,
+        "images_attach_s": 0.007,
+        "llm_est_prefill_s": 9.0911,
+        "llm_est_decode_s": 5.1333,
+        "prompt_tokens": 49174,
+        "completion_tokens": 231,
+        "total_tokens": 49405
+      },
+      {
+        "step": 6,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 4.0161,
+        "llm_s": 3.9901,
+        "tools_s": 0.0043,
+        "images_attach_s": 0.0116,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 3.9901,
+        "prompt_tokens": 6856,
+        "completion_tokens": 191,
+        "total_tokens": 7047
+      },
+      {
+        "step": 7,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 17.1899,
+        "llm_s": 17.1677,
+        "tools_s": 0.0074,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.7899,
+        "llm_est_decode_s": 16.3778,
+        "prompt_tokens": 9616,
+        "completion_tokens": 737,
+        "total_tokens": 10353
+      },
+      {
+        "step": 8,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 11.5649,
+        "llm_s": 11.1218,
+        "tools_s": 0.4102,
+        "images_attach_s": 0.0116,
+        "llm_est_prefill_s": 2.0996,
+        "llm_est_decode_s": 9.0222,
+        "prompt_tokens": 9835,
+        "completion_tokens": 406,
+        "total_tokens": 10241
+      },
+      {
+        "step": 9,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 5.7214,
+        "llm_s": 5.6855,
+        "tools_s": 0.0038,
+        "images_attach_s": 0.0183,
+        "llm_est_prefill_s": 0.4633,
+        "llm_est_decode_s": 5.2222,
+        "prompt_tokens": 6916,
+        "completion_tokens": 235,
+        "total_tokens": 7151
+      },
+      {
+        "step": 10,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 20.4694,
+        "llm_s": 20.4287,
+        "tools_s": 0.001,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 20.4287,
+        "prompt_tokens": 9649,
+        "completion_tokens": 943,
+        "total_tokens": 10592
+      },
+      {
+        "step": 11,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 14.4356,
+        "llm_s": 14.3943,
+        "tools_s": 0.009,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.8165,
+        "llm_est_decode_s": 10.5778,
+        "prompt_tokens": 9904,
+        "completion_tokens": 476,
+        "total_tokens": 10380
+      },
+      {
+        "step": 12,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 11.464,
+        "llm_s": 10.3523,
+        "tools_s": 0.9589,
+        "images_attach_s": 0.1262,
+        "llm_est_prefill_s": 2.6189,
+        "llm_est_decode_s": 7.7333,
+        "prompt_tokens": 10236,
+        "completion_tokens": 348,
+        "total_tokens": 10584
+      },
+      {
+        "step": 13,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 11.0335,
+        "llm_s": 9.2348,
+        "tools_s": 1.6974,
+        "images_attach_s": 0.0819,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 9.2348,
+        "prompt_tokens": 6877,
+        "completion_tokens": 418,
+        "total_tokens": 7295
+      },
+      {
+        "step": 14,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 23.9476,
+        "llm_s": 22.1261,
+        "tools_s": 1.5495,
+        "images_attach_s": 0.0516,
+        "llm_est_prefill_s": 5.615,
+        "llm_est_decode_s": 16.5111,
+        "prompt_tokens": 12258,
+        "completion_tokens": 743,
+        "total_tokens": 13001
+      },
+      {
+        "step": 15,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 19.228,
+        "llm_s": 18.9016,
+        "tools_s": 0.0137,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 11.5461,
+        "llm_est_decode_s": 7.3556,
+        "prompt_tokens": 14823,
+        "completion_tokens": 331,
+        "total_tokens": 15154
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "plan技能",
+      "title": "强化Plan提示词约束：禁用run_python替代专用工具并强制hints JSON必填键",
+      "target_files": [
+        "agent/prompts/plan_system_prompt.md"
+      ],
+      "concrete_steps": [
+        "在 agent/prompts/plan_system_prompt.md 的 Tool Selection 规则区块顶部插入硬性约束：'禁止使用 run_python 执行装配图标记或坐标提取，必须调用 mark_tp_on_assembly_from_pdf_hit。'",
+        "在 Output Format 区块追加 JSON 结构校验指令：'生成 hints JSON 时，必须包含 region_hint、visual_cues 或 reference_text 至少一个字段，缺失则视为格式错误并重试。'",
+        "验证修改后的 prompt 长度未超过 4000 tokens，确保不影响预填充性能。"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 111.99,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 343934,
+      "completion_tokens": 14962,
+      "total_tokens": 358896,
+      "reasoning_tokens": 6913
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 385794,
+      "completion_tokens": 6815,
+      "total_tokens": 392609
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 729728,
+      "completion_tokens": 21777,
+      "total_tokens": 751505
+    },
+    "cursor_apply": {}
+  }
+}

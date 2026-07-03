@@ -1,3 +1,4 @@
+import "dotenv/config";
 import http from "node:http";
 import path from "node:path";
 import { createDefaultAgent } from "../agent/factory.js";
@@ -12,21 +13,37 @@ import { RobotGatewayClient } from "../adapters/robotGatewayClient.js";
 import { readMg400Config, writeMg400Config } from "../adapters/mg400Config.js";
 import { VlmAgentCaseAdapter } from "../adapters/vlmAgentCaseAdapter.js";
 import { VlmAgentServiceRunner } from "../adapters/vlmAgentServiceRunner.js";
+import { RemoteVlmAgentServiceRunner } from "../adapters/remoteVlmAgentServiceRunner.js";
 import { RealVlmAgentRunner } from "../adapters/realVlmAgentRunner.js";
 import { MockEquipmentController } from "../adapters/mockEquipmentController.js";
 import { ReportGenerator } from "../adapters/reportGenerator.js";
-import { getEthernetInfo } from "../adapters/ethernetConfig.js";
+import { getEthernetInfo, autoDetectAdapter } from "../adapters/ethernetConfig.js";
 import { defaultVlmAgentRunsDir } from "../adapters/defaultPaths.js";
+import { VlmStatusMonitor } from "./vlmStatus.js";
 
 const port = Number(process.env.PORT || 3000);
 const cliFallbackRunner = new RealVlmAgentRunner();
 const agent = createDefaultAgent({ vlmRunner: cliFallbackRunner });
-const serviceRunner = process.env.VLM_AGENT_RUNNER === "cli" ? null : new VlmAgentServiceRunner();
+
+// Decide runner mode based on VLM_AGENT_RUNNER env var:
+//   "cli"        → no service runner (use CLI fallback directly)
+//   "remote-svc" → RemoteVlmAgentServiceRunner (upload to remote server)
+//   (default)    → VlmAgentServiceRunner (local FastAPI + CLI fallback)
+const runnerMode = (process.env.VLM_AGENT_RUNNER || "").trim();
+let serviceRunner = null;
+if (runnerMode === "remote-svc") {
+  serviceRunner = new RemoteVlmAgentServiceRunner();
+} else if (runnerMode !== "cli") {
+  serviceRunner = new VlmAgentServiceRunner({ fallbackRunner: cliFallbackRunner });
+}
 const serviceCaseAdapter = serviceRunner ? new VlmAgentCaseAdapter() : null;
 const robotGateway = new RobotGatewayClient();
 const serviceArmController = robotGateway;
 const serviceEquipmentController = new MockEquipmentController();
 const serviceReportGenerator = new ReportGenerator();
+const vlmStatus = new VlmStatusMonitor({
+  workerCount: Number(process.env.VLM_MONITOR_WORKERS || 2)
+});
 
 async function route(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`);
@@ -39,6 +56,11 @@ async function route(request, response) {
   if (request.method === "GET" && url.pathname === "/") {
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end(webPage);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/vlm/status") {
+    sendJson(response, 200, vlmStatus.snapshot());
     return;
   }
 
@@ -92,8 +114,49 @@ async function route(request, response) {
     return;
   }
 
+  // 避障服务代理 → Python avoidance_service on port 8001
+  const avoidMatch = url.pathname.match(/^\/api\/avoidance(\/.*)?$/);
+  if (avoidMatch) {
+    const avoidPath = avoidMatch[1] || "/health";
+    const avoidUrl = `http://127.0.0.1:8001${avoidPath}`;
+    try {
+      const avoidResp = await fetch(avoidUrl, {
+        method: request.method,
+        headers: { "Content-Type": "application/json" },
+        body: request.method === "POST" ? JSON.stringify(await readJsonBody(request)) : undefined
+      });
+      const avoidData = await avoidResp.json();
+      sendJson(response, avoidResp.status, avoidData);
+    } catch {
+      sendJson(response, 503, { ok: false, error: "避障服务未启动 (端口8001)" });
+    }
+    return;
+  }
+
+  // Proxy cloud VLM status to avoid browser CORS issues
+  const vlmProxyMatch = url.pathname.match(/^\/api\/vlm-proxy\/runs\/([^/]+)$/);
+  if (request.method === "GET" && vlmProxyMatch) {
+    try {
+      const cloudUrl = `${serviceRunner.baseUrl}/v1/runs/${encodeURIComponent(vlmProxyMatch[1])}`;
+      const resp = await fetch(cloudUrl);
+      const data = await resp.json();
+      sendJson(response, resp.status, data);
+    } catch {
+      sendJson(response, 502, { error: "Cloud VLM unreachable" });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/api/ethernet/info") {
-    const name = url.searchParams.get("name") || "以太网";
+    let name = url.searchParams.get("name") || "";
+    if (!name || name === "以太网") {
+      const detected = await autoDetectAdapter();
+      if (detected) name = detected;
+    }
+    if (!name) {
+      sendJson(response, 400, { ok: false, message: "未找到活跃网卡，请手动输入网卡名称。" });
+      return;
+    }
     sendJson(response, 200, { ok: true, adapter: await getEthernetInfo(name) });
     return;
   }
@@ -106,7 +169,8 @@ async function route(request, response) {
       return;
     }
 
-    sendJson(response, 200, run);
+    // Strip large base64 fields to keep response small (polled every 5s)
+    sendJson(response, 200, stripBinaryForApi(run));
     return;
   }
 
@@ -121,6 +185,7 @@ async function route(request, response) {
 
 const server = http.createServer((request, response) => {
   route(request, response).catch((error) => {
+    if (response.headersSent) return;
     const statusCode = error.statusCode || 500;
     sendJson(response, statusCode, {
       ok: false,
@@ -137,31 +202,73 @@ server.listen(port, () => {
 async function startServiceBackedRun(input) {
   const run = createBenchRun(input);
   run.serviceMode = true;
-  transition(run, AgentState.PREPARING, "Parsed input; creating Debugging-agent-v2 task.");
+  transition(run, AgentState.PREPARING, "Parsed input; creating VLM task with split planner.");
   run.vlmAgentCase = await serviceCaseAdapter.adapt({ runId: run.runId, input });
-  run.vlmService = await serviceRunner.createRun({
-    run_id: run.runId,
-    task_file: run.vlmAgentCase.taskFile,
-    name: run.runId,
-    workspace: serviceWorkspace(input),
-    max_steps: serviceRunner.maxSteps,
-    ...(serviceRunner.envFile ? { env_file: serviceRunner.envFile } : {})
+
+  const workspace = serviceWorkspace(input, run.runId);
+  const runnerMode = process.env.VLM_AGENT_RUNNER || "";
+  const isRemote = serviceRunner instanceof RemoteVlmAgentServiceRunner;
+
+  if (isRemote) {
+    const uploadId = `${run.runId}_upload`;
+    const uploaded = await serviceRunner.createRunRemote({
+      vlmAgentCase: run.vlmAgentCase,
+      input,
+      runId: uploadId,
+      workspace,
+    });
+    try { await serviceRunner.cancelRun(uploaded.run_id); } catch {}
+    const serverTaskFile = `data/cases/${uploadId}/task.yaml`;
+    run.vlmService = await serviceRunner.createSplitRun({
+      task_file: serverTaskFile,
+      run_id: run.runId,
+      name: run.runId,
+      workspace,
+      max_steps: serviceRunner.maxSteps,
+    });
+  } else {
+    run.vlmService = await serviceRunner.createSplitRun({
+      task_file: run.vlmAgentCase.taskFile,
+      run_id: run.runId,
+      name: run.runId,
+      workspace,
+      max_steps: serviceRunner.maxSteps,
+      ...(serviceRunner.envFile ? { env_file: serviceRunner.envFile } : {})
+    });
+  }
+
+  vlmStatus.registerRun(run, {
+    maxSteps: serviceRunner.maxSteps,
+    serviceUrl: serviceRunner.baseUrl,
+    runnerMode
   });
   saveRun(run);
   appendRunEvent(run.runId, "node.vlm_forwarded", {
     serviceUrl: serviceRunner.baseUrl,
     serviceStatus: run.vlmService.status,
-    taskFile: run.vlmAgentCase.taskFile
+    taskFile: run.vlmAgentCase.taskFile,
+    runnerMode,
+    workspace,
+    splitMode: true,
   });
-  finalizeServiceBackedRun(run.runId).catch((error) => {
+  vlmStatus.markSubmitted(run.runId, {
+    serviceUrl: serviceRunner.baseUrl,
+    serviceStatus: run.vlmService.status,
+    taskFile: run.vlmAgentCase.taskFile,
+    runnerMode,
+    workspace,
+  });
+
+  finalizeSplitServiceRun(run.runId).catch((error) => {
     const stored = getRun(run.runId);
     if (stored) {
       stored.error = error.message;
-      transition(stored, AgentState.REPORTING, `Service-backed run failed: ${error.message}`);
+      transition(stored, AgentState.REPORTING, `Service-backed split run failed: ${error.message}`);
       appendRunEvent(run.runId, "node.failed", {
         error: error.message,
         details: error.details || null
       });
+      vlmStatus.markRunFailed(run.runId, error);
     }
   });
   return run;
@@ -181,77 +288,132 @@ async function startCliFallbackRun(input, serviceError) {
   return run;
 }
 
-async function finalizeServiceBackedRun(runId) {
-  const run = getRun(runId);
+async function finalizeSplitServiceRun(parentRunId) {
+  const run = getRun(parentRunId);
   if (!run) return;
-  const completed = await serviceRunner.waitForRun(runId, {
+
+  const completed = await serviceRunner.waitForRun(parentRunId, {
     onEvent: (event) => {
-      appendRunEvent(runId, event.type, {
-        ...event.payload,
+      appendRunEvent(parentRunId, event.type, {
+        ...(event.payload || {}),
         serviceSeq: event.seq,
         serviceEventId: event.event_id,
         serviceTimestamp: event.timestamp
       });
+      vlmStatus.handleEvent(parentRunId, event.type, event.payload || {});
+
+      const childRunId = event.payload?.child_run_id;
+      const targetPoint = event.payload?.target_point;
+      if (childRunId && !vlmStatus.runs.has(childRunId)) {
+        const childStatusRun = statusRunForChild(run, childRunId, targetPoint);
+        vlmStatus.registerRun(childStatusRun, {
+          maxSteps: serviceRunner.maxSteps,
+          serviceUrl: serviceRunner.baseUrl,
+          runnerMode: process.env.VLM_AGENT_RUNNER || ""
+        });
+        vlmStatus.markSubmitted(childRunId, {
+          serviceUrl: serviceRunner.baseUrl,
+          serviceStatus: "running",
+          taskFile: run.vlmAgentCase.taskFile,
+          runnerMode: process.env.VLM_AGENT_RUNNER || "",
+          workspace: serviceWorkspace(run.input, childRunId),
+        });
+      }
+      if (childRunId) {
+        const childEventType = event.type.replace(/^child\./, "");
+        vlmStatus.handleEvent(childRunId, childEventType, event.payload || {});
+      }
     }
   });
+
   run.vlmService = completed;
+  reconcileSplitMonitor(parentRunId, completed);
+
   if (completed.status !== "succeeded") {
-    run.error = completed.error || `VLM service status: ${completed.status}`;
+    run.error = completed.error || `Split service status: ${completed.status}`;
     transition(run, AgentState.REPORTING, run.error);
-    appendRunEvent(runId, "node.failed", { error: run.error, service: completed });
+    appendRunEvent(parentRunId, "node.failed", { error: run.error, service: completed });
+    vlmStatus.handleEvent(parentRunId, "node.failed", { error: run.error });
     return;
   }
 
-  const finalAnswer = completed.final_answer || null;
-  const pixel = normalizePixel(finalAnswer?.pixel);
-  run.vlmObservation = buildVlmObservation({ input: run.input, service: completed, finalAnswer, pixel });
-  run.modelOutput = buildModelOutput({ service: completed, finalAnswer, pixel });
-  run.plan = mapVlmTargetToExecution({
-    input: run.input,
-    ragEvidence: run.ragEvidence || [],
-    vlmObservation: run.vlmObservation,
-    modelOutput: run.modelOutput
-  });
-  appendRunEvent(runId, "node.execution_mapping_created", { plan: run.plan });
+  const finalAnswer = completed.final_answer || {};
+  const children = finalAnswer.children || [];
 
-  transition(run, AgentState.EXECUTING, "VLM service completed; target execution mapping created; executing MG400 flow.");
-  const blockedLocations = new Map();
-  for (const step of run.plan.steps) {
-    if (step.kind === StepKind.ARM_MOTION || step.kind === StepKind.VISUAL_CAPTURE) {
-      const armResult = await serviceArmController.execute(step);
-      run.execution.arm.push(armResult);
-      appendRunEvent(runId, "robot.action_finished", { step, result: armResult });
-      await serviceRunner.postObservation(runId, {
-        type: "robot.observation",
-        source: "node-mg400-gateway",
-        payload: armResult
-      });
-      if (armResult.status === "BLOCKED" && step.targetLocationId) {
-        blockedLocations.set(step.targetLocationId, armResult);
-      }
-    }
-    if (step.kind === StepKind.EQUIPMENT_MEASUREMENT) {
-      const blockedArm = blockedLocations.get(step.locationId);
-      if (blockedArm) {
-        run.execution.equipment.push({
-          stepId: step.id,
-          status: "SKIPPED",
-          instrument: step.instrument,
-          signal: step.signal,
-          locationId: step.locationId,
-          pass: false,
-          reason: blockedArm.message || blockedArm.error || "Arm motion did not reach the requested measurement point."
-        });
-      } else {
-        run.execution.equipment.push(await serviceEquipmentController.measure(step));
-      }
-      appendRunEvent(runId, "equipment.measurement_finished", {
-        step,
-        result: run.execution.equipment.at(-1)
-      });
-    }
+  const allPoints = children
+    .filter((c) => c.final_answer)
+    .map((c) => ({
+      id: c.target_point,
+      label: c.target_point,
+      final_answer: c.final_answer,
+      pixel: normalizePixelFromAnswer(c.final_answer),
+      childRunId: c.child_run_id,
+    }));
+
+  if (allPoints.length === 0) {
+    transition(run, AgentState.REPORTING, "Split VLM completed but no child runs succeeded.");
+    appendRunEvent(parentRunId, "node.failed", { error: "No successful child runs", points: allPoints });
+    return;
   }
 
+  transition(run, AgentState.EXECUTING,
+    `Split VLM completed: ${allPoints.length}/${children.length} child runs succeeded; executing MG400 flow.`
+  );
+
+  // Execute robot arm for each successful point
+  const blockedLocations = new Map();
+  for (const point of allPoints) {
+    const finalAnswer = { ...point.final_answer, tp_id: point.id };
+    const pixel = point.pixel;
+    const childRunId = point.childRunId;
+
+    run.vlmObservation = buildVlmObservation({ input: run.input, service: completed, finalAnswer, pixel, points: allPoints });
+    run.modelOutput = buildModelOutput({ service: completed, finalAnswer, pixel, pointId: point.id });
+    run.plan = mapVlmTargetToExecution({
+      input: run.input,
+      ragEvidence: run.ragEvidence || [],
+      vlmObservation: run.vlmObservation,
+      modelOutput: run.modelOutput
+    });
+    appendRunEvent(parentRunId, "node.execution_mapping_created", { plan: run.plan, targetPoint: point.id });
+
+    for (const step of run.plan.steps) {
+      if (step.kind === StepKind.ARM_MOTION || step.kind === StepKind.VISUAL_CAPTURE) {
+        const armResult = await serviceArmController.execute(step);
+        run.execution.arm.push(armResult);
+        vlmStatus.markMg400("executing", { runId: parentRunId, stepId: step.id, action: `MG400 ${step.kind} → ${point.id}`, result: armResult });
+        appendRunEvent(parentRunId, "robot.action_finished", { step, result: armResult, targetPoint: point.id });
+        if (childRunId) {
+          await serviceRunner.postObservation(childRunId, {
+            type: "robot.observation",
+            source: "node-mg400-gateway",
+            payload: { ...armResult, target_point: point.id }
+          }).catch(() => {});
+        }
+        if (armResult.status === "BLOCKED" && step.targetLocationId) {
+          blockedLocations.set(step.targetLocationId, armResult);
+        }
+      }
+      if (step.kind === StepKind.EQUIPMENT_MEASUREMENT) {
+        const blockedArm = blockedLocations.get(step.locationId);
+        if (blockedArm) {
+          run.execution.equipment.push({
+            stepId: step.id, status: "SKIPPED", instrument: step.instrument,
+            signal: step.signal, locationId: step.locationId, pass: false,
+            reason: blockedArm.message || blockedArm.error || "Arm motion did not reach the requested measurement point."
+          });
+        } else {
+          run.execution.equipment.push(await serviceEquipmentController.measure(step));
+        }
+        appendRunEvent(parentRunId, "equipment.measurement_finished", { step, result: run.execution.equipment.at(-1), targetPoint: point.id });
+      }
+    }
+
+    // Wait for robot to settle before next point
+    await new Promise(resolve => setTimeout(resolve, 5000));
+  }
+
+  vlmStatus.markMg400("idle", { action: "MG400 空闲" });
   transition(run, AgentState.REPORTING, "Execution completed; generating report.");
   run.report = serviceReportGenerator.create({
     run,
@@ -259,13 +421,69 @@ async function finalizeServiceBackedRun(runId) {
     vlmObservation: run.vlmObservation,
     measurements: run.execution.equipment
   });
-  appendRunEvent(runId, "node.completed", { run });
-  updateRun(runId, run);
+  appendRunEvent(parentRunId, "node.completed", {
+    points: allPoints,
+    childCount: children.length,
+  });
+  vlmStatus.handleEvent(parentRunId, "node.completed", { runId: parentRunId, points: allPoints });
+  updateRun(parentRunId, run);
 }
 
-function serviceWorkspace(input) {
+function reconcileSplitMonitor(parentRunId, completed) {
+  const terminalEvent = completed.status === "succeeded" ? "agent.final" : "agent.failed";
+  vlmStatus.handleEvent(parentRunId, terminalEvent, {
+    final_answer: completed.final_answer || null,
+    error: completed.error || null,
+  });
+
+  const children = completed.final_answer?.children || completed.vlm_split?.child_runs || [];
+  for (const child of children) {
+    const childRunId = child.child_run_id;
+    if (!childRunId || !vlmStatus.runs.has(childRunId)) continue;
+    const childStatus = child.status || (child.final_answer ? "succeeded" : "failed");
+    vlmStatus.handleEvent(
+      childRunId,
+      childStatus === "succeeded" ? "agent.final" : "agent.failed",
+      {
+        final_answer: child.final_answer || null,
+        error: child.error || null,
+      }
+    );
+  }
+}
+
+function statusRunForChild(parentRun, childRunId, label) {
+  const instruction = parentRun.input?.instruction || parentRun.input?.command || "";
+  return {
+    ...parentRun,
+    runId: childRunId,
+    input: {
+      ...parentRun.input,
+      instruction: `${instruction} / ${label}`,
+      command: `${instruction} / ${label}`
+    }
+  };
+}
+
+function normalizePixelFromAnswer(finalAnswer) {
+  if (!finalAnswer) return null;
+  const pixel = finalAnswer.pixel || finalAnswer.pixel_array;
+  if (Array.isArray(pixel) && pixel.length === 2) return [Math.round(pixel[0]), Math.round(pixel[1])];
+  const points = finalAnswer.points;
+  if (Array.isArray(points) && points.length > 0) {
+    const p = points[0].pixel || points[0].pixel_array;
+    if (Array.isArray(p)) return [Math.round(p[0]), Math.round(p[1])];
+  }
+  return null;
+}
+
+function serviceWorkspace(input, runId = null) {
   const caseId = sanitizeSegment(input.caseId) || sanitizeSegment(input.command) || "inputdemo-case";
-  return path.join(defaultVlmAgentRunsDir(), caseId);
+  const workspaceName = runId ? `${caseId}-${sanitizeSegment(runId)}` : caseId;
+  const base = defaultVlmAgentRunsDir();
+  // Use forward-slash join to avoid Windows backslash in Linux paths
+  const sep = base.includes("\\") ? "\\" : "/";
+  return base + (base.endsWith(sep) || base.endsWith("/") ? "" : "/") + workspaceName;
 }
 
 function buildVlmObservation({ input, service, finalAnswer, pixel }) {
@@ -314,9 +532,9 @@ function buildVlmObservation({ input, service, finalAnswer, pixel }) {
   };
 }
 
-function buildModelOutput({ service, finalAnswer, pixel }) {
+function buildModelOutput({ service, finalAnswer, pixel, pointId = null }) {
   const pose = normalizePose(finalAnswer?.mg400Pose || finalAnswer?.mg400_pose || finalAnswer?.pose)
-    || poseFromPixel(pixel || finalAnswer?.pixel);
+    || poseFromPixel(pixel || finalAnswer?.pixel, pointId);
   return {
     model: process.env.VLM_MODEL || "vlm-agent-service",
     provider: "debugging-agent-v2-service",
@@ -356,12 +574,39 @@ function normalizePose(value) {
   return pose;
 }
 
-function poseFromPixel(value) {
+function poseFromPixel(value, pointId = null) {
+  // Hardcoded test mapping: pixel → MG400 world coordinates
+  if (pointId) {
+    const known = HARDCODED_POSES[String(pointId).toUpperCase()];
+    if (known) return { ...known };
+  }
   if (!Array.isArray(value) || value.length !== 2) return null;
   const x = Number(value[0]);
   const y = Number(value[1]);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
   return { x: Math.round(x), y: Math.round(y), z: 0, r: 0 };
+}
+
+const HARDCODED_POSES = {
+  "TP1": { x: 320, y: 50, z: 60, r: 0 },
+  "TP6": { x: 280, y: -120, z: 70, r: 0 },
+};
+
+function stripBinaryForApi(run) {
+  // Shallow-clone and remove large base64 dataUrl fields + nodeEvents
+  // to avoid circular reference and 6+ MB responses on poll.
+  if (!run || !run.input) return run;
+  const { nodeEvents, ...rest } = run;
+  const stripped = { ...rest };
+  const input = { ...run.input };
+  for (const key of ["cameraImage", "bitImage", "bitPdf", "schematicImage", "schematicPdf"]) {
+    const field = input[key];
+    if (field && field.dataUrl && field.dataUrl.length > 1000) {
+      input[key] = { ...field, dataUrl: "[stripped:" + (field.dataUrl.length || 0) + "]" };
+    }
+  }
+  stripped.input = input;
+  return stripped;
 }
 
 function sanitizeSegment(value) {

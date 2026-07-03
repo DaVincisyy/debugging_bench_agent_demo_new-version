@@ -1,26 +1,43 @@
-"""HTTP service wrapper for the VLM agent."""
+"""HTTP service wrapper for the VLM agent.
+
+Supports both local and remote deployment:
+- Local: task YAML + assets already on the server filesystem → POST /v1/runs
+- Remote: Node.js uploads case files → POST /v1/runs/upload
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import threading
 import time
 import uuid
+import zipfile
+import io as io_mod
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent import Agent
 from .config import compose_agent_question, load_config, load_task
+from .logging_setup import get_logger, setup_project_logging
 
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+setup_project_logging()
+log = get_logger(__name__)
+
+# Server-wide configurable base directory for uploaded cases
+UPLOAD_CASES_DIR = Path(
+    __import__("os").environ.get("VLM_AGENT_CASES_DIR", "data/cases")
+).resolve()
 
 
 class RunRequest(BaseModel):
@@ -72,6 +89,7 @@ class RunManager:
             run = ManagedRun(run_id=run_id, request=req)
             self._runs[run_id] = run
             self._append_event(run, "agent.queued", {"task_file": req.task_file})
+            log.info("Run queued run_id=%s task=%s", run_id, req.task_file)
             run.future = self._executor.submit(self._execute, run_id)
             return run
 
@@ -142,6 +160,7 @@ class RunManager:
             run.status = "running"
             run.updated_at = time.time()
             self._append_event(run, "agent.started", {"task_file": req.task_file})
+            log.info("Run started run_id=%s task=%s", run_id, req.task_file)
 
         try:
             overrides: dict[str, Any] = {"workspace_dir": Path(req.workspace)}
@@ -185,12 +204,15 @@ class RunManager:
                 action = self._build_robot_action(result.final_answer)
                 if action is not None:
                     self._append_event(run, "robot.action_proposed", action)
+                log.info("Run finished run_id=%s status=%s stopped_reason=%s",
+                         run_id, run.status, run.stopped_reason)
         except BaseException as exc:  # noqa: BLE001
             with self._lock:
                 run.status = "failed"
                 run.error = str(exc)
                 run.updated_at = time.time()
                 self._append_event(run, "agent.failed", {"error": run.error})
+            log.exception("Run crashed run_id=%s error=%s", run_id, str(exc))
 
     def _build_robot_action(self, final_answer: Any) -> dict[str, Any] | None:
         if not isinstance(final_answer, dict):
@@ -233,10 +255,141 @@ class RunManager:
 manager = RunManager()
 app = FastAPI(title="Debugging Agent VLM Service")
 
+# CORS — allow the Node.js orchestrator to call from any origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "service": "debugging-agent-v2"}
+
+
+# ------------------------------------------------------------------ #
+#  Remote upload endpoint
+# ------------------------------------------------------------------ #
+
+@app.post("/v1/runs/upload", status_code=202)
+async def create_run_with_files(
+    task_yaml: UploadFile = File(..., description="The task.yaml file content"),
+    files: list[UploadFile] = File(
+        default=[],
+        description="All image/PDF/data files referenced in the task YAML",
+    ),
+    run_id: str | None = Form(None),
+    name: str | None = Form(None),
+    workspace: str = Form("workspace"),
+    max_steps: int | None = Form(None),
+    env_file: str = Form(".env"),
+    model: str | None = Form(None),
+    base_url: str | None = Form(None),
+    no_native_tools: bool = Form(False),
+) -> dict[str, Any]:
+    """Create a run by uploading task YAML + referenced asset files.
+
+    The server writes everything into a per-case directory under
+    ``VLM_AGENT_CASES_DIR`` (default: ``data/cases/<case_id>/``) and
+    then executes the agent. This is the primary endpoint for remote
+    Node.js orchestration where the case files originate on the client.
+    """
+    case_id = run_id or f"case_{uuid.uuid4().hex[:12]}"
+    case_dir = UPLOAD_CASES_DIR / case_id
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Save task YAML
+    try:
+        yaml_bytes = await task_yaml.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read task_yaml: {e}") from e
+    task_file = case_dir / "task.yaml"
+    task_file.write_bytes(yaml_bytes)
+    log.info("Upload: wrote task YAML → %s (%d bytes)", task_file, len(yaml_bytes))
+
+    # 2. Save all uploaded asset files
+    saved_count = 0
+    for f in (files or []):
+        if not f.filename or f.filename == "task.yaml":
+            continue
+        try:
+            content = await f.read()
+        except Exception as e:
+            log.warning("Upload: skip file %s — read error: %s", f.filename, e)
+            continue
+        dest = case_dir / f.filename
+        dest.write_bytes(content)
+        saved_count += 1
+        log.info("Upload: saved %s → %s (%d bytes)", f.filename, dest, len(content))
+
+    log.info("Upload: case ready case_id=%s dir=%s files=%d",
+             case_id, str(case_dir), saved_count + 1)
+
+    # 3. Create and execute the run
+    req = RunRequest(
+        task_file=str(task_file),
+        run_id=run_id,
+        name=name,
+        env_file=env_file,
+        workspace=workspace,
+        max_steps=max_steps or 25,
+        model=model,
+        base_url=base_url,
+        no_native_tools=no_native_tools,
+    )
+    try:
+        run = manager.create(req)
+    except ValueError as exc:
+        # Clean up on conflict
+        shutil.rmtree(case_dir, ignore_errors=True)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    snapshot = manager.snapshot(run)
+    snapshot["case_dir"] = str(case_dir)
+    return snapshot
+
+
+# ------------------------------------------------------------------ #
+#  Download generated workspace files
+# ------------------------------------------------------------------ #
+
+@app.get("/v1/runs/{run_id}/files/{file_path:path}")
+async def download_run_file(run_id: str, file_path: str) -> Any:
+    """Download a file generated inside a run's workspace.
+
+    Common paths: ``summary.json``, ``debug/step08_final_tp.png``,
+    ``debug/case10_assembly_drawing_tp_marked.png``, etc.
+    """
+    run = manager.get(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if not run.run_dir:
+        raise HTTPException(status_code=404, detail="Run directory not available yet.")
+
+    # Safety: normalize and reject path traversal
+    run_dir = Path(run.run_dir).resolve()
+    requested = (run_dir / file_path).resolve()
+    if run_dir not in requested.parents and requested != run_dir:
+        raise HTTPException(status_code=403, detail="Path traversal not allowed.")
+
+    if not requested.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+    if not requested.is_file():
+        raise HTTPException(status_code=404, detail=f"Not a file: {file_path}")
+
+    return FileResponse(
+        path=str(requested),
+        media_type="application/octet-stream",
+        filename=requested.name,
+    )
+
+
+# ------------------------------------------------------------------ #
+#  Standard endpoints (unchanged)
+# ------------------------------------------------------------------ #
 
 
 @app.post("/v1/runs", status_code=202)

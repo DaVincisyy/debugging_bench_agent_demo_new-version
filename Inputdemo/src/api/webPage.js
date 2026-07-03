@@ -217,12 +217,196 @@ export const webPage = String.raw`<!doctype html>
       font-size: 12px;
       line-height: 1.55;
     }
+    .monitor-overview {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric {
+      border: 1px solid #e3eaf2;
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 12px;
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .metric strong { font-size: 20px; line-height: 1; }
+    .metric span { color: var(--muted); font-size: 12px; }
+    .worker-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .worker-card {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #d8e3ee;
+      border-radius: 8px;
+      background: #fff;
+      padding: 13px;
+      display: grid;
+      gap: 9px;
+      min-height: 170px;
+    }
+    .worker-card.running {
+      border-color: rgba(20, 108, 148, 0.42);
+      box-shadow: 0 12px 28px rgba(20, 108, 148, 0.10);
+    }
+    .worker-card.running::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 3px;
+      background: linear-gradient(90deg, #146c94, #0f766e, #d97706, #146c94);
+      background-size: 240% 100%;
+      animation: monitor-flow 1.8s linear infinite;
+    }
+    .worker-card.failed { border-color: rgba(180, 35, 24, 0.45); }
+    .worker-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+    .worker-title { font-weight: 800; font-size: 14px; }
+    .worker-status {
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #eef2f7;
+      color: #475467;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .worker-status.running { background: #e6f4f1; color: var(--good); }
+    .worker-status.failed { background: #fef3f2; color: var(--danger); }
+    .worker-run {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .worker-action {
+      font-size: 14px;
+      line-height: 1.45;
+      min-height: 40px;
+    }
+    .worker-meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .worker-meta div {
+      border: 1px solid #eef2f7;
+      border-radius: 7px;
+      padding: 8px;
+      background: #f8fafc;
+      min-width: 0;
+    }
+    .worker-meta span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 3px;
+    }
+    .worker-meta strong {
+      display: block;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .activity-list {
+      display: grid;
+      gap: 8px;
+    }
+    .activity-row {
+      border: 1px solid #e5ebf3;
+      border-radius: 7px;
+      padding: 9px 10px;
+      background: #fff;
+      display: grid;
+      gap: 3px;
+      font-size: 13px;
+    }
+    .activity-row strong { overflow-wrap: anywhere; }
+    .activity-row span { color: var(--muted); font-size: 12px; }
+    .mg400-strip {
+      border: 1px solid #e5ebf3;
+      border-radius: 8px;
+      background: #fbfdff;
+      padding: 11px 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .step-timeline {
+      display: grid;
+      gap: 8px;
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+    .step-row {
+      border: 1px solid #e5ebf3;
+      border-radius: 7px;
+      background: #fff;
+      padding: 10px 11px;
+      display: grid;
+      gap: 5px;
+    }
+    .step-row.running {
+      border-color: rgba(20, 108, 148, 0.42);
+      background: #f6fbfd;
+    }
+    .step-row.failed {
+      border-color: rgba(180, 35, 24, 0.42);
+      background: #fffafa;
+    }
+    .step-row.final {
+      border-color: rgba(15, 118, 110, 0.42);
+      background: #f6fbfa;
+    }
+    .step-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .step-title {
+      font-weight: 760;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+    .step-state {
+      border-radius: 999px;
+      padding: 2px 7px;
+      background: #eef2f7;
+      color: #475467;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .step-row.running .step-state { background: #e8f4f8; color: var(--primary); }
+    .step-row.failed .step-state { background: #fef3f2; color: var(--danger); }
+    .step-row.final .step-state { background: #e6f4f1; color: var(--good); }
+    .step-meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    @keyframes monitor-flow {
+      from { background-position: 0 0; }
+      to { background-position: 240% 0; }
+    }
     @media (max-width: 1050px) {
       main { grid-template-columns: 1fr; padding: 16px; }
       .topbar { padding: 14px 16px; }
     }
     @media (max-width: 720px) {
       .grid-2, .grid-4, .upload-grid { grid-template-columns: 1fr; }
+      .monitor-overview, .worker-grid, .worker-meta { grid-template-columns: 1fr; }
       .jog { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .section-head { align-items: flex-start; flex-direction: column; }
       .kv div { grid-template-columns: 1fr; gap: 3px; }
@@ -340,6 +524,49 @@ export const webPage = String.raw`<!doctype html>
             <span id="runStatus" class="status"></span>
           </div>
         </form>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <div class="section-title">
+            <h2>运行监控</h2>
+            <div class="section-note">实时显示两个 VLM 通道、当前动作、等待队列和 MG400 执行状态。</div>
+          </div>
+          <span id="monitorUpdated" class="status">等待状态...</span>
+        </div>
+        <div class="section-body stack">
+          <div class="monitor-overview">
+            <div class="metric">
+              <strong id="activeVlmCount">0</strong>
+              <span>活跃 VLM</span>
+            </div>
+            <div class="metric">
+              <strong id="queuedRunCount">0</strong>
+              <span>等待任务</span>
+            </div>
+            <div class="metric">
+              <strong id="mg400MonitorState">idle</strong>
+              <span>MG400</span>
+            </div>
+          </div>
+          <div id="vlmWorkerGrid" class="worker-grid"></div>
+          <div class="mg400-strip">
+            <strong>MG400</strong>
+            <span id="mg400MonitorAction" class="status">等待状态...</span>
+          </div>
+          <div>
+            <h3>等待队列</h3>
+            <div id="vlmQueueList" class="activity-list">
+              <div class="activity-row"><span>暂无等待任务</span></div>
+            </div>
+          </div>
+          <div>
+            <h3>最近完成</h3>
+            <div id="vlmRecentList" class="activity-list">
+              <div class="activity-row"><span>暂无完成记录</span></div>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -487,6 +714,12 @@ export const webPage = String.raw`<!doctype html>
           <div id="resultSummary" class="hint">提交后显示摘要。</div>
           <div class="row">
           </div>
+          <div>
+            <h3>VLM Step Timeline</h3>
+            <div id="vlmTimeline" class="step-timeline">
+              <div class="activity-row"><span>Waiting for VLM events</span></div>
+            </div>
+          </div>
           <pre id="eventLog" class="hidden"></pre>
           <pre id="result">等待操作...</pre>
         </div>
@@ -498,6 +731,7 @@ export const webPage = String.raw`<!doctype html>
     const resultEl = document.querySelector("#result");
     const resultSummaryEl = document.querySelector("#resultSummary");
     const eventLogEl = document.querySelector("#eventLog");
+    const vlmTimelineEl = document.querySelector("#vlmTimeline");
     const modeBadge = document.querySelector("#modeBadge");
     const runStatus = document.querySelector("#runStatus");
     const configStatus = document.querySelector("#configStatus");
@@ -528,15 +762,26 @@ export const webPage = String.raw`<!doctype html>
     const cameraSnapshotEl = document.querySelector("#cameraSnapshot");
     const cameraImageListEl = document.querySelector("#cameraImageList");
     const attachmentListEl = document.querySelector("#attachmentList");
+    const vlmWorkerGridEl = document.querySelector("#vlmWorkerGrid");
+    const vlmQueueListEl = document.querySelector("#vlmQueueList");
+    const vlmRecentListEl = document.querySelector("#vlmRecentList");
+    const activeVlmCountEl = document.querySelector("#activeVlmCount");
+    const queuedRunCountEl = document.querySelector("#queuedRunCount");
+    const mg400MonitorStateEl = document.querySelector("#mg400MonitorState");
+    const mg400MonitorActionEl = document.querySelector("#mg400MonitorAction");
+    const monitorUpdatedEl = document.querySelector("#monitorUpdated");
     let promptMode = "text";
     let finalTranscript = "";
     let cameraStream = null;
     let capturedCameraImage = null;
     let currentRun = null;
+    let selectedMonitorRunId = null;
+    let vlmStatusTimer = null;
     let currentRunStatusTimer = null;
     let currentRunEventsTimer = null;
     let currentRunEventsSource = null;
     let currentRunEventSeq = 0;
+    let currentTimelineEvents = [];
 
     const fields = {
       mode: document.querySelector("#mode"),
@@ -588,13 +833,26 @@ export const webPage = String.raw`<!doctype html>
           message: tools + " tool call(s), " + elapsed + "s" + (content ? " - " + content : "")
         };
       }
-      if (event.type === "tool.finished") {
-        const status = payload.ok === false ? "failed" : "ok";
-        const final = payload.is_final ? ", final" : "";
-        const text = String(payload.text || "").replace(/\s+/g, " ").slice(0, 140);
+      if (event.type === "tool.started") {
+        const toolCall = payload.tool_call || {};
+        const rawStep = payload.index ?? payload.step;
+        const step = Number.isFinite(Number(rawStep)) ? Number(rawStep) + 1 : null;
         return {
-          title: "Tool " + (payload.name || "finished"),
-          message: status + final + (text ? " - " + text : "")
+          title: "Tool " + (toolCall.name || payload.name || "started"),
+          message: (step ? "Step " + step + " - " : "") + "running"
+        };
+      }
+      if (event.type === "tool.finished") {
+        const toolCall = payload.tool_call || {};
+        const toolResult = payload.tool_result || {};
+        const rawStep = payload.index ?? payload.step;
+        const step = Number.isFinite(Number(rawStep)) ? Number(rawStep) + 1 : null;
+        const status = (toolResult.ok ?? payload.ok) === false ? "failed" : "ok";
+        const final = payload.final || toolResult.is_final || payload.is_final ? ", final" : "";
+        const text = String(toolResult.text || payload.text || "").replace(/\s+/g, " ").slice(0, 140);
+        return {
+          title: "Tool " + (toolCall.name || payload.name || "finished"),
+          message: (step ? "Step " + step + " - " : "") + status + final + (text ? " - " + text : "")
         };
       }
       if (event.type === "agent.step") {
@@ -631,6 +889,8 @@ export const webPage = String.raw`<!doctype html>
     function watchRunStatus(runId) {
       stopRunWatchers();
       currentRunEventSeq = 0;
+      currentTimelineEvents = [];
+      renderVlmTimeline(currentTimelineEvents);
       eventLogEl.textContent = "";
       eventLogEl.classList.remove("hidden");
       appendEventLog({
@@ -717,12 +977,326 @@ export const webPage = String.raw`<!doctype html>
 
     function appendRunEvent(event) {
       currentRunEventSeq = Math.max(currentRunEventSeq, Number(event.seq) || currentRunEventSeq);
+      currentTimelineEvents.push(event);
+      renderVlmTimeline(currentTimelineEvents);
       appendEventLog(event);
+    }
+
+    function renderVlmTimeline(events) {
+      const rows = buildVlmTimeline(events || []);
+      if (!rows.length) {
+        vlmTimelineEl.innerHTML = "<div class='activity-row'><span>Waiting for VLM events</span></div>";
+        return;
+      }
+      vlmTimelineEl.innerHTML = rows.map(renderTimelineRow).join("");
+      vlmTimelineEl.scrollTop = vlmTimelineEl.scrollHeight;
+    }
+
+    function buildVlmTimeline(events) {
+      const rows = [];
+      const byStep = new Map();
+      const byTool = new Map();
+      const stepsWithToolEvents = new Set();
+
+      for (const event of events) {
+        const payload = event.payload || {};
+        if (event.type === "agent.queued") {
+          rows.push(timelineLifecycleRow(event, "queued", "Run queued", payload.task_file || ""));
+          continue;
+        }
+        if (event.type === "agent.started") {
+          rows.push(timelineLifecycleRow(event, "running", "Agent started", payload.task_file || ""));
+          continue;
+        }
+        if (event.type === "agent.run_dir") {
+          rows.push(timelineLifecycleRow(event, "done", "Workspace ready", payload.run_dir || payload.workspace || ""));
+          continue;
+        }
+        if (event.type === "agent.waiting") {
+          const step = displayTimelineStep(payload);
+          const key = "step-" + step;
+          const row = byStep.get(key) || {
+            key,
+            step,
+            order: timelineStepOrder(payload),
+            status: "running",
+            title: "Step " + step + " waiting for model",
+            tool: "",
+            message: "Waiting for model response",
+            at: event.timestamp
+          };
+          row.status = "running";
+          row.title = "Step " + step + " waiting for model";
+          row.message = "Waiting for model response";
+          row.at = row.at || event.timestamp;
+          byStep.set(key, row);
+          continue;
+        }
+        if (event.type === "tool.started") {
+          const step = displayTimelineStep(payload);
+          const toolCall = payload.tool_call || {};
+          const toolName = toolCall.name || payload.name || "tool";
+          const key = "tool-" + step + "-" + (toolCall.id || toolName || event.seq);
+          stepsWithToolEvents.add(String(step));
+          byTool.set(key, {
+            key,
+            step,
+            order: timelineStepOrder(payload),
+            status: "running",
+            title: "Step " + step + " - " + toolName,
+            tool: toolName,
+            message: "Running" + (toolCall.arguments_preview ? ": " + String(toolCall.arguments_preview).slice(0, 180) : ""),
+            at: event.timestamp
+          });
+          continue;
+        }
+        if (event.type === "tool.finished") {
+          const step = displayTimelineStep(payload);
+          const toolCall = payload.tool_call || {};
+          const toolResult = payload.tool_result || {};
+          const toolName = toolCall.name || payload.name || "tool";
+          const key = "tool-" + step + "-" + (toolCall.id || toolName || event.seq);
+          stepsWithToolEvents.add(String(step));
+          const row = byTool.get(key) || {
+            key,
+            step,
+            order: timelineStepOrder(payload),
+            title: "Step " + step + " - " + toolName,
+            tool: toolName,
+            at: event.timestamp
+          };
+          const failed = toolResult.ok === false || toolResult.status === "failed";
+          const final = Boolean(payload.final || toolResult.is_final);
+          row.status = final ? "final" : (failed ? "failed" : "done");
+          row.message = timelineToolResultMessage(payload);
+          row.finishedAt = event.timestamp;
+          byTool.set(key, row);
+          continue;
+        }
+        if (event.type === "agent.step") {
+          const step = displayTimelineStep(payload);
+          if (stepsWithToolEvents.has(String(step))) continue;
+          const key = "step-" + step;
+          const tools = timelineToolNames(payload);
+          const failed = timelineHasFailedTool(payload);
+          const final = Boolean(payload.final);
+          const row = byStep.get(key) || { key, step, order: timelineStepOrder(payload), at: event.timestamp };
+          row.status = final ? "final" : (failed ? "failed" : "done");
+          row.title = "Step " + step + (tools ? " - " + tools : "");
+          row.tool = tools;
+          row.message = timelineStepMessage(payload);
+          row.at = row.at || event.timestamp;
+          row.finishedAt = event.timestamp;
+          byStep.set(key, row);
+          continue;
+        }
+        if (event.type === "agent.final") {
+          rows.push(timelineLifecycleRow(event, "final", "Final answer", payload.summary_path || payload.stopped_reason || ""));
+          continue;
+        }
+        if (event.type === "agent.failed" || event.type === "node.failed") {
+          rows.push(timelineLifecycleRow(event, "failed", "Run failed", payload.error || payload.stopped_reason || ""));
+          continue;
+        }
+      }
+
+      return [...rows, ...byStep.values(), ...byTool.values()]
+        .sort((a, b) => {
+          const orderDelta = Number(a.order || 0) - Number(b.order || 0);
+          if (orderDelta) return orderDelta;
+          return Number(a.at || 0) - Number(b.at || 0);
+        });
+    }
+
+    function timelineLifecycleRow(event, status, title, message) {
+      const lifecycleOrder = status === "queued" ? 1
+        : status === "running" ? 2
+          : status === "done" ? 3
+            : status === "final" ? 10000
+              : status === "failed" ? 10001
+                : 9999;
+      return {
+        key: event.event_id || event.seq || title,
+        status,
+        title,
+        message,
+        order: lifecycleOrder,
+        at: event.timestamp
+      };
+    }
+
+    function renderTimelineRow(row) {
+      const cls = row.status === "running" ? " running" : row.status === "failed" ? " failed" : row.status === "final" ? " final" : "";
+      const when = row.at ? formatEventTime(row.at) : "";
+      const message = [row.message, when].filter(Boolean).join(" | ");
+      return [
+        "<div class='step-row" + cls + "'>",
+        "<div class='step-head'>",
+        "<div class='step-title'>" + escapeHtml(row.title || "-") + "</div>",
+        "<div class='step-state'>" + escapeHtml(row.status || "-") + "</div>",
+        "</div>",
+        "<div class='step-meta'>" + escapeHtml(message || "-") + "</div>",
+        "</div>"
+      ].join("");
+    }
+
+    function displayTimelineStep(payload) {
+      const raw = payload.index ?? payload.step;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value + 1 : "?";
+    }
+
+    function timelineStepOrder(payload) {
+      const raw = payload.index ?? payload.step;
+      const value = Number(raw);
+      return Number.isFinite(value) ? 100 + value : 9998;
+    }
+
+    function timelineToolNames(payload) {
+      const calls = payload.tool_calls || (payload.tool_call ? [payload.tool_call] : []);
+      return calls.map((item) => item?.name).filter(Boolean).join(", ");
+    }
+
+    function timelineHasFailedTool(payload) {
+      const results = payload.tool_results || (payload.tool_result ? [payload.tool_result] : []);
+      return results.some((item) => item?.ok === false || item?.status === "failed");
+    }
+
+    function timelineStepMessage(payload) {
+      const results = payload.tool_results || (payload.tool_result ? [payload.tool_result] : []);
+      const first = results.find(Boolean);
+      const text = first?.text || first?.feedback || first?.message || first?.error || "";
+      if (text) return String(text).replace(/\s+/g, " ").slice(0, 220);
+      const calls = payload.tool_calls || (payload.tool_call ? [payload.tool_call] : []);
+      if (calls.length) return calls.length + " tool call(s)";
+      return payload.final ? "Final tool completed" : "Step completed";
+    }
+
+    function timelineToolResultMessage(payload) {
+      const result = payload.tool_result || {};
+      const duration = Number.isFinite(Number(payload.duration_s || result.duration_s))
+        ? Number(payload.duration_s || result.duration_s).toFixed(2) + "s"
+        : "";
+      const text = result.text || result.feedback || result.message || result.error || "";
+      const body = text ? String(text).replace(/\s+/g, " ").slice(0, 220) : "Tool completed";
+      return [duration, body].filter(Boolean).join(" - ");
+    }
+
+    function formatEventTime(value) {
+      const numeric = Number(value);
+      const millis = numeric > 100000000000 ? numeric : numeric * 1000;
+      return new Date(millis).toLocaleTimeString();
     }
 
     function showEthernetDetails(data) {
       ethernetDetails.classList.remove("hidden");
       ethernetDetails.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    function showProgressPanel(runId) {
+      selectedMonitorRunId = runId;
+      refreshVlmStatus();
+    }
+
+    function removeProgressPanel() {
+      selectedMonitorRunId = null;
+    }
+
+    function startVlmStatusPolling() {
+      if (vlmStatusTimer) clearInterval(vlmStatusTimer);
+      vlmStatusTimer = setInterval(refreshVlmStatus, 1000);
+      refreshVlmStatus();
+    }
+
+    async function refreshVlmStatus() {
+      try {
+        const data = await jsonFetch("/api/vlm/status");
+        renderVlmStatus(data);
+      } catch (error) {
+        renderVlmStatus({
+          ok: false,
+          activeCount: 0,
+          queueCount: 0,
+          workers: [],
+          queue: [],
+          recent: [],
+          mg400: {
+            status: "unknown",
+            action: "WebUI status service unavailable"
+          },
+          updatedAt: Date.now()
+        });
+        monitorUpdatedEl.textContent = "监控读取失败：" + error.message;
+      }
+    }
+
+    function renderVlmStatus(data) {
+      activeVlmCountEl.textContent = String(data.activeCount || 0);
+      queuedRunCountEl.textContent = String(data.queueCount || 0);
+      mg400MonitorStateEl.textContent = data.mg400?.status || "idle";
+      mg400MonitorActionEl.textContent = data.mg400?.action || "MG400 空闲";
+      monitorUpdatedEl.textContent = "更新 " + new Date(data.updatedAt || Date.now()).toLocaleTimeString();
+      vlmWorkerGridEl.innerHTML = (data.workers || []).map(renderWorkerCard).join("");
+      vlmQueueListEl.innerHTML = renderActivityList(data.queue || [], "暂无等待任务");
+      vlmRecentListEl.innerHTML = renderActivityList(data.recent || [], "暂无完成记录");
+    }
+
+    function renderWorkerCard(worker) {
+      const status = worker.status || "idle";
+      const isRunning = status !== "idle";
+      const selected = worker.runId && worker.runId === selectedMonitorRunId;
+      const step = worker.step ? "Step " + worker.step + (worker.maxSteps ? " / Max " + worker.maxSteps : "") : "-";
+      const lastTool = worker.lastTool || "-";
+      const elapsed = isRunning ? formatDuration(worker.elapsedMs || 0) : "-";
+      const runLine = worker.runId
+        ? escapeHtml(worker.runId) + (worker.caseId ? " · " + escapeHtml(worker.caseId) : "")
+        : "等待新任务";
+      return [
+        "<div class='worker-card " + (isRunning ? "running " : "") + (status === "failed" ? "failed " : "") + "'>",
+        "<div class='worker-head'>",
+        "<div class='worker-title'>" + escapeHtml(worker.id || "vlm") + (selected ? " · 当前" : "") + "</div>",
+        "<div class='worker-status " + (isRunning ? "running" : "") + (status === "failed" ? " failed" : "") + "'>" + escapeHtml(status) + "</div>",
+        "</div>",
+        "<div class='worker-run'>" + runLine + "</div>",
+        "<div class='worker-action'>" + escapeHtml(worker.action || (isRunning ? "运行中" : "等待新任务")) + "</div>",
+        "<div class='worker-meta'>",
+        "<div><span>进度</span><strong>" + escapeHtml(step) + "</strong></div>",
+        "<div><span>工具</span><strong>" + escapeHtml(lastTool) + "</strong></div>",
+        "<div><span>耗时</span><strong>" + escapeHtml(elapsed) + "</strong></div>",
+        "</div>",
+        "<div class='worker-run'>" + escapeHtml(worker.lastEventType || worker.phase || "") + "</div>",
+        "</div>"
+      ].join("");
+    }
+
+    function renderActivityList(items, emptyText) {
+      if (!items.length) return "<div class='activity-row'><span>" + escapeHtml(emptyText) + "</span></div>";
+      return items.map((item) => {
+        const step = item.step ? " · Step " + item.step + (item.maxSteps ? " / Max " + item.maxSteps : "") : "";
+        const tool = item.lastTool ? " · " + item.lastTool : "";
+        return [
+          "<div class='activity-row'>",
+          "<strong>" + escapeHtml(item.runId || "-") + (item.caseId ? " · " + escapeHtml(item.caseId) : "") + "</strong>",
+          "<span>" + escapeHtml((item.status || "-") + step + tool + " · " + formatDuration(item.elapsedMs || 0)) + "</span>",
+          "<span>" + escapeHtml(item.action || item.lastEventType || "") + "</span>",
+          "</div>"
+        ].join("");
+      }).join("");
+    }
+
+    function formatDuration(ms) {
+      const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+      const minutes = Math.floor(total / 60);
+      const seconds = total % 60;
+      return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
     function setStatus(el, text, kind = "") {
@@ -944,6 +1518,10 @@ export const webPage = String.raw`<!doctype html>
 
     function renderResult(run) {
       currentRun = run;
+      if (Array.isArray(run.nodeEvents) && run.nodeEvents.length >= currentTimelineEvents.length) {
+        currentTimelineEvents = run.nodeEvents.slice();
+        renderVlmTimeline(currentTimelineEvents);
+      }
       const attachmentCount = run.input.modelAttachments?.length || 0;
       const imageRef = run.vlmObservation?.imageRef || "-";
       const pose = run.modelOutput?.mg400Pose || null;
@@ -1070,9 +1648,12 @@ export const webPage = String.raw`<!doctype html>
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
-        setStatus(runStatus, data.serviceMode ? "Queued; waiting for service result..." : "完成", "ok");
+        setStatus(runStatus, "已提交 · 云端推理中...", "ok");
         renderResult(data);
-        if (data.serviceMode && data.runId) watchRunStatus(data.runId);
+        if (data.serviceMode && data.runId) {
+          showProgressPanel(data.runId);
+          watchRunStatus(data.runId);
+        }
       } catch (error) {
         setStatus(runStatus, error.message, "error");
         show(error.payload || error.message);
@@ -1099,11 +1680,6 @@ export const webPage = String.raw`<!doctype html>
     document.querySelector("#testConnection").addEventListener("click", async () => {
       try {
         setStatus(configStatus, "正在测试连接...");
-        await jsonFetch("/api/mg400/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(collectConfig())
-        });
         const data = await jsonFetch("/api/mg400/test", { method: "POST" });
         setStatus(configStatus, "连接成功", "ok");
         show(data);
@@ -1208,6 +1784,8 @@ export const webPage = String.raw`<!doctype html>
         show(error.message);
         updateBadge("simulation");
       });
+
+    startVlmStatusPolling();
 
   </script>
 </body>

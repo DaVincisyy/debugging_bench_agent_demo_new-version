@@ -1,0 +1,531 @@
+{
+  "iteration": 14,
+  "apply_outcome": "reverted_pixel",
+  "good_sha_before": "7221f16ef62ccff05baeb3f23ed6b66fea6ed30e",
+  "good_sha_after": "7221f16ef62ccff05baeb3f23ed6b66fea6ed30e",
+  "primary_run": {
+    "run_id": "20260630-162907-task",
+    "part_timing": {
+      "part0_s": 38.6837,
+      "partb_s": 28.2189,
+      "parta_s": 18.5864,
+      "partc_s": 0.0,
+      "partd_s": 18.009,
+      "unknown_s": 0.0,
+      "total_s": 103.498
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2033,
+      1118
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2033,
+        1118
+      ],
+      "dx": -5,
+      "dy": 4,
+      "distance_px": 6.4,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 108735,
+        "completion_tokens": 3514,
+        "total_tokens": 112249,
+        "reasoning_tokens": 1892
+      },
+      "reflection": {
+        "prompt_tokens": 4067,
+        "completion_tokens": 5850,
+        "total_tokens": 9917,
+        "reasoning_tokens": 4447
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 3271,
+        "completion_tokens": 4221,
+        "total_tokens": 7492,
+        "reasoning_tokens": 3639
+      },
+      "combined": {
+        "prompt_tokens": 116073,
+        "completion_tokens": 13585,
+        "total_tokens": 129658,
+        "reasoning_tokens": 8086
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 8.3081,
+        "llm_s": 8.1075,
+        "tools_s": 0.1996,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.9287,
+        "llm_est_decode_s": 6.1778,
+        "prompt_tokens": 10241,
+        "completion_tokens": 278,
+        "total_tokens": 10519
+      },
+      {
+        "step": 1,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 9.2871,
+        "llm_s": 9.2084,
+        "tools_s": 0.0011,
+        "images_attach_s": 0.0759,
+        "llm_est_prefill_s": 4.3195,
+        "llm_est_decode_s": 4.8889,
+        "prompt_tokens": 10561,
+        "completion_tokens": 220,
+        "total_tokens": 10781
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text",
+          "mark_tp_on_assembly_from_pdf_hit",
+          "save_text_file"
+        ],
+        "step_total_s": 17.3918,
+        "llm_s": 15.6354,
+        "tools_s": 1.7436,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.0798,
+        "llm_est_decode_s": 14.5556,
+        "prompt_tokens": 13367,
+        "completion_tokens": 655,
+        "total_tokens": 14022
+      },
+      {
+        "step": 3,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 3.6967,
+        "llm_s": 3.6855,
+        "tools_s": 0.002,
+        "images_attach_s": 0.002,
+        "llm_est_prefill_s": 0.841,
+        "llm_est_decode_s": 2.8444,
+        "prompt_tokens": 6689,
+        "completion_tokens": 128,
+        "total_tokens": 6817
+      },
+      {
+        "step": 4,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 8.9228,
+        "llm_s": 8.9126,
+        "tools_s": 0.003,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 8.9126,
+        "prompt_tokens": 9444,
+        "completion_tokens": 410,
+        "total_tokens": 9854
+      },
+      {
+        "step": 5,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 3.3312,
+        "llm_s": 3.1011,
+        "tools_s": 0.2226,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.3678,
+        "llm_est_decode_s": 1.7333,
+        "prompt_tokens": 9728,
+        "completion_tokens": 78,
+        "total_tokens": 9806
+      },
+      {
+        "step": 6,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 6.7931,
+        "llm_s": 6.7794,
+        "tools_s": 0.0021,
+        "images_attach_s": 0.0072,
+        "llm_est_prefill_s": 2.6905,
+        "llm_est_decode_s": 4.0889,
+        "prompt_tokens": 6774,
+        "completion_tokens": 184,
+        "total_tokens": 6958
+      },
+      {
+        "step": 7,
+        "tools": [
+          "run_python"
+        ],
+        "step_total_s": 9.1718,
+        "llm_s": 9.113,
+        "tools_s": 0.0432,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 9.113,
+        "prompt_tokens": 9513,
+        "completion_tokens": 419,
+        "total_tokens": 9932
+      },
+      {
+        "step": 8,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 14.2298,
+        "llm_s": 14.211,
+        "tools_s": 0.0034,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.4776,
+        "llm_est_decode_s": 13.7333,
+        "prompt_tokens": 9681,
+        "completion_tokens": 618,
+        "total_tokens": 10299
+      },
+      {
+        "step": 9,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 4.3566,
+        "llm_s": 3.9647,
+        "tools_s": 0.3712,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.2091,
+        "llm_est_decode_s": 1.7556,
+        "prompt_tokens": 10027,
+        "completion_tokens": 79,
+        "total_tokens": 10106
+      },
+      {
+        "step": 10,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 7.6528,
+        "llm_s": 5.6985,
+        "tools_s": 1.9482,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.3652,
+        "llm_est_decode_s": 3.3333,
+        "prompt_tokens": 6859,
+        "completion_tokens": 150,
+        "total_tokens": 7009
+      },
+      {
+        "step": 11,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 10.3562,
+        "llm_s": 10.3493,
+        "tools_s": 0.0039,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.7937,
+        "llm_est_decode_s": 6.5556,
+        "prompt_tokens": 5851,
+        "completion_tokens": 295,
+        "total_tokens": 6146
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "agent代码",
+        "title": "强制结构化输出与确定性工具静默执行",
+        "target_files": [
+          "agent/prompts/system_prompt.md",
+          "agent/core/executor.py"
+        ],
+        "concrete_steps": [
+          "在 system_prompt.md 的 <output_format> 区块强制注入 JSON Schema 约束，要求所有步骤输出必须严格匹配 {\"reasoning\": \"string\", \"action\": \"object\"} 格式",
+          "在 executor.py 的 prepare_llm_request() 函数中，为 save_text_file 和 run_python 工具调用动态追加 max_tokens: 150 与 stop_sequences: [\"\\n\"] 参数",
+          "在 agent/config/tools.yaml 中为上述工具添加 silent: true 标记，并在执行循环中拦截 LLM 返回的非 JSON 文本，直接丢弃并触发工具调用"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "精简Phase交接上下文与过滤冗余文件路径",
+        "target_files": [
+          "agent/core/context_manager.py",
+          "data/skills/phase_handoff.md"
+        ],
+        "concrete_steps": [
+          "修改 context_manager.py 的 serialize_phase_artifacts() 方法，增加白名单过滤逻辑：仅保留文件名匹配 *_coords.json 或 *_status.yaml 的 artifact",
+          "更新 phase_handoff.md 模板，移除 <image_history> 与 <debug_logs> 占位符，替换为紧凑的 <compact_state_summary> JSON 字段",
+          "在 context_manager.py 的 build_context() 末尾注入 truncate_if_over_tokens(prompt, limit=6000) 逻辑，优先截断历史 step 的 observation 字段"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260630-163649-task",
+    "part_timing": {
+      "part0_s": 31.5304,
+      "partb_s": 16.4046,
+      "parta_s": 15.4023,
+      "partc_s": 0.0,
+      "partd_s": 13.9842,
+      "unknown_s": 0.0,
+      "total_s": 77.3215
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2056,
+      1141
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2056,
+        1141
+      ],
+      "dx": 18,
+      "dy": 27,
+      "distance_px": 32.4,
+      "within_tolerance": false,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 89783,
+        "completion_tokens": 2594,
+        "total_tokens": 92377,
+        "reasoning_tokens": 1304
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 89783,
+        "completion_tokens": 2594,
+        "total_tokens": 92377
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "search_pdf_text",
+          "view_image"
+        ],
+        "step_total_s": 9.2135,
+        "llm_s": 8.9556,
+        "tools_s": 0.1777,
+        "images_attach_s": 0.079,
+        "llm_est_prefill_s": 2.1768,
+        "llm_est_decode_s": 6.7778,
+        "prompt_tokens": 10394,
+        "completion_tokens": 305,
+        "total_tokens": 10699
+      },
+      {
+        "step": 1,
+        "tools": [
+          "search_pdf_text",
+          "mark_tp_on_assembly_from_pdf_hit",
+          "save_text_file"
+        ],
+        "step_total_s": 17.3923,
+        "llm_s": 15.6176,
+        "tools_s": 1.7634,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.9727,
+        "llm_est_decode_s": 13.6444,
+        "prompt_tokens": 13474,
+        "completion_tokens": 614,
+        "total_tokens": 14088
+      },
+      {
+        "step": 2,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 4.9246,
+        "llm_s": 4.9135,
+        "tools_s": 0.0026,
+        "images_attach_s": 0.003,
+        "llm_est_prefill_s": 2.0246,
+        "llm_est_decode_s": 2.8889,
+        "prompt_tokens": 6842,
+        "completion_tokens": 130,
+        "total_tokens": 6972
+      },
+      {
+        "step": 3,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 8.5714,
+        "llm_s": 8.5615,
+        "tools_s": 0.0035,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.206,
+        "llm_est_decode_s": 8.3556,
+        "prompt_tokens": 9609,
+        "completion_tokens": 376,
+        "total_tokens": 9985
+      },
+      {
+        "step": 4,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 4.0461,
+        "llm_s": 3.8108,
+        "tools_s": 0.2277,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.8552,
+        "llm_est_decode_s": 1.9556,
+        "prompt_tokens": 9854,
+        "completion_tokens": 88,
+        "total_tokens": 9942
+      },
+      {
+        "step": 5,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 3.7871,
+        "llm_s": 3.773,
+        "tools_s": 0.0013,
+        "images_attach_s": 0.0078,
+        "llm_est_prefill_s": 0.4619,
+        "llm_est_decode_s": 3.3111,
+        "prompt_tokens": 6927,
+        "completion_tokens": 149,
+        "total_tokens": 7076
+      },
+      {
+        "step": 6,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 11.2463,
+        "llm_s": 11.2265,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.3598,
+        "llm_est_decode_s": 9.8667,
+        "prompt_tokens": 9662,
+        "completion_tokens": 444,
+        "total_tokens": 10106
+      },
+      {
+        "step": 7,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 4.156,
+        "llm_s": 3.7545,
+        "tools_s": 0.3854,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.1323,
+        "llm_est_decode_s": 1.6222,
+        "prompt_tokens": 10005,
+        "completion_tokens": 73,
+        "total_tokens": 10078
+      },
+      {
+        "step": 8,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 7.4453,
+        "llm_s": 5.3287,
+        "tools_s": 2.113,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.9509,
+        "llm_est_decode_s": 3.3778,
+        "prompt_tokens": 7012,
+        "completion_tokens": 152,
+        "total_tokens": 7164
+      },
+      {
+        "step": 9,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 6.5389,
+        "llm_s": 6.5313,
+        "tools_s": 0.004,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.6869,
+        "llm_est_decode_s": 5.8444,
+        "prompt_tokens": 6004,
+        "completion_tokens": 263,
+        "total_tokens": 6267
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 156.24,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 116073,
+      "completion_tokens": 13585,
+      "total_tokens": 129658,
+      "reasoning_tokens": 8086
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 89783,
+      "completion_tokens": 2594,
+      "total_tokens": 92377
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 205856,
+      "completion_tokens": 16179,
+      "total_tokens": 222035
+    },
+    "cursor_apply": {}
+  }
+}

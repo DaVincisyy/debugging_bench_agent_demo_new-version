@@ -109,6 +109,20 @@ export class VlmAgentServiceRunner {
     }, "create VLM agent service run", this.baseUrl);
   }
 
+  async createSplitRun(payload) {
+    return requestServiceJson(`${this.baseUrl}/v1/runs/split`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }, "create VLM agent split run", this.baseUrl);
+  }
+
+  async cancelRun(runId) {
+    return requestServiceJson(`${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST"
+    }, "cancel VLM agent run", this.baseUrl).catch(() => null);
+  }
+
   async getRun(runId) {
     return requestServiceJson(
       `${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}`,

@@ -1,0 +1,660 @@
+{
+  "iteration": 18,
+  "apply_outcome": "kept",
+  "good_sha_before": "82d2c7909c2205f504c59e6f2cbd0d6c823a32ed",
+  "good_sha_after": "45a0260d7aafa0620f76583b415c7f4c74f37331",
+  "primary_run": {
+    "run_id": "20260609-011939-task",
+    "part_timing": {
+      "part0_s": 72.5169,
+      "partb_s": 26.6038,
+      "parta_s": 70.3903,
+      "partc_s": 0.0,
+      "partd_s": 43.6651,
+      "unknown_s": 20.0178,
+      "total_s": 233.1939
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 396376,
+        "completion_tokens": 7931,
+        "total_tokens": 404307,
+        "reasoning_tokens": 5412
+      },
+      "reflection": {
+        "prompt_tokens": 5134,
+        "completion_tokens": 4747,
+        "total_tokens": 9881,
+        "reasoning_tokens": 3460
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 3193,
+        "completion_tokens": 4046,
+        "total_tokens": 7239,
+        "reasoning_tokens": 3744
+      },
+      "combined": {
+        "prompt_tokens": 404703,
+        "completion_tokens": 16724,
+        "total_tokens": 421427,
+        "reasoning_tokens": 7204
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 20.0178,
+        "llm_s": 19.956,
+        "tools_s": 0.0052,
+        "images_attach_s": 0.0136,
+        "llm_est_prefill_s": 8.7548,
+        "llm_est_decode_s": 11.2,
+        "prompt_tokens": 45209,
+        "completion_tokens": 504,
+        "total_tokens": 45713
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 24.8109,
+        "llm_s": 24.742,
+        "tools_s": 0.0064,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.142,
+        "llm_est_decode_s": 22.6,
+        "prompt_tokens": 48054,
+        "completion_tokens": 1017,
+        "total_tokens": 49071
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 10.551,
+        "llm_s": 8.3974,
+        "tools_s": 2.0963,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 5.4863,
+        "llm_est_decode_s": 2.9111,
+        "prompt_tokens": 48638,
+        "completion_tokens": 131,
+        "total_tokens": 48769
+      },
+      {
+        "step": 3,
+        "tools": [
+          "run_python"
+        ],
+        "step_total_s": 13.3084,
+        "llm_s": 13.2473,
+        "tools_s": 0.0052,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.3584,
+        "llm_est_decode_s": 9.8889,
+        "prompt_tokens": 48857,
+        "completion_tokens": 445,
+        "total_tokens": 49302
+      },
+      {
+        "step": 4,
+        "tools": [
+          "read_text_file"
+        ],
+        "step_total_s": 6.1585,
+        "llm_s": 6.0995,
+        "tools_s": 0.0012,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 4.4328,
+        "llm_est_decode_s": 1.6667,
+        "prompt_tokens": 49127,
+        "completion_tokens": 75,
+        "total_tokens": 49202
+      },
+      {
+        "step": 5,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 10.4036,
+        "llm_s": 10.0149,
+        "tools_s": 0.3165,
+        "images_attach_s": 0.0094,
+        "llm_est_prefill_s": 3.6371,
+        "llm_est_decode_s": 6.3778,
+        "prompt_tokens": 49235,
+        "completion_tokens": 287,
+        "total_tokens": 49522
+      },
+      {
+        "step": 6,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 7.2845,
+        "llm_s": 7.2434,
+        "tools_s": 0.0056,
+        "images_attach_s": 0.014,
+        "llm_est_prefill_s": 0.7767,
+        "llm_est_decode_s": 6.4667,
+        "prompt_tokens": 6856,
+        "completion_tokens": 291,
+        "total_tokens": 7147
+      },
+      {
+        "step": 7,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 13.1122,
+        "llm_s": 13.0858,
+        "tools_s": 0.0063,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.6413,
+        "llm_est_decode_s": 12.4444,
+        "prompt_tokens": 9620,
+        "completion_tokens": 560,
+        "total_tokens": 10180
+      },
+      {
+        "step": 8,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 7.8881,
+        "llm_s": 7.4949,
+        "tools_s": 0.3605,
+        "images_attach_s": 0.0114,
+        "llm_est_prefill_s": 1.1828,
+        "llm_est_decode_s": 6.3111,
+        "prompt_tokens": 9848,
+        "completion_tokens": 284,
+        "total_tokens": 10132
+      },
+      {
+        "step": 9,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 5.6035,
+        "llm_s": 5.5652,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0206,
+        "llm_est_prefill_s": 0.8319,
+        "llm_est_decode_s": 4.7333,
+        "prompt_tokens": 6903,
+        "completion_tokens": 213,
+        "total_tokens": 7116
+      },
+      {
+        "step": 10,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 24.1436,
+        "llm_s": 24.105,
+        "tools_s": 0.0024,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.0383,
+        "llm_est_decode_s": 23.0667,
+        "prompt_tokens": 9641,
+        "completion_tokens": 1038,
+        "total_tokens": 10679
+      },
+      {
+        "step": 11,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 15.5886,
+        "llm_s": 15.5647,
+        "tools_s": 0.002,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.7425,
+        "llm_est_decode_s": 14.8222,
+        "prompt_tokens": 9895,
+        "completion_tokens": 667,
+        "total_tokens": 10562
+      },
+      {
+        "step": 12,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 19.987,
+        "llm_s": 19.9456,
+        "tools_s": 0.0082,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.4123,
+        "llm_est_decode_s": 19.5333,
+        "prompt_tokens": 10149,
+        "completion_tokens": 879,
+        "total_tokens": 11028
+      },
+      {
+        "step": 13,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 10.6711,
+        "llm_s": 9.4742,
+        "tools_s": 1.0404,
+        "images_attach_s": 0.1236,
+        "llm_est_prefill_s": 1.1853,
+        "llm_est_decode_s": 8.2889,
+        "prompt_tokens": 10458,
+        "completion_tokens": 373,
+        "total_tokens": 10831
+      },
+      {
+        "step": 14,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 12.1861,
+        "llm_s": 10.279,
+        "tools_s": 1.7809,
+        "images_attach_s": 0.1002,
+        "llm_est_prefill_s": 0.6346,
+        "llm_est_decode_s": 9.6444,
+        "prompt_tokens": 6853,
+        "completion_tokens": 434,
+        "total_tokens": 7287
+      },
+      {
+        "step": 15,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 15.7591,
+        "llm_s": 13.8735,
+        "tools_s": 1.6035,
+        "images_attach_s": 0.0627,
+        "llm_est_prefill_s": 5.718,
+        "llm_est_decode_s": 8.1556,
+        "prompt_tokens": 12234,
+        "completion_tokens": 367,
+        "total_tokens": 12601
+      },
+      {
+        "step": 16,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 15.7199,
+        "llm_s": 15.3395,
+        "tools_s": 0.0156,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 7.2061,
+        "llm_est_decode_s": 8.1333,
+        "prompt_tokens": 14799,
+        "completion_tokens": 366,
+        "total_tokens": 15165
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "工具契约",
+        "title": "为 save_text_file 注入强类型 JSON Schema 与必填字段模板",
+        "target_files": [
+          "agent/tools/save_text_file.py",
+          "agent/prompts/part_a_hints.md"
+        ],
+        "concrete_steps": [
+          "在 agent/tools/save_text_file.py 中定义 Pydantic BaseModel，强制声明 region_hint、visual_cues、reference_text 为必填字段",
+          "在 agent/prompts/part_a_hints.md 的系统提示词末尾追加该 JSON Schema 定义及 1 个完整合规示例",
+          "修改工具路由层的参数校验逻辑，在 LLM 调用前拦截缺失必填字段的请求并返回结构化错误，避免触发 plan-guard 后置拦截与无效重试"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260609-013011-task",
+    "part_timing": {
+      "part0_s": 58.8592,
+      "partb_s": 31.164,
+      "parta_s": 41.4714,
+      "partc_s": 0.0,
+      "partd_s": 47.1445,
+      "unknown_s": 18.3592,
+      "total_s": 196.9983
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 287512,
+        "completion_tokens": 7313,
+        "total_tokens": 294825,
+        "reasoning_tokens": 5192
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 287512,
+        "completion_tokens": 7313,
+        "total_tokens": 294825
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 18.3592,
+        "llm_s": 18.2904,
+        "tools_s": 0.0044,
+        "images_attach_s": 0.0156,
+        "llm_est_prefill_s": 6.0893,
+        "llm_est_decode_s": 12.2,
+        "prompt_tokens": 45209,
+        "completion_tokens": 549,
+        "total_tokens": 45758
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 16.7684,
+        "llm_s": 16.6881,
+        "tools_s": 0.0085,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.2871,
+        "llm_est_decode_s": 14.4,
+        "prompt_tokens": 48032,
+        "completion_tokens": 648,
+        "total_tokens": 48680
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 15.8641,
+        "llm_s": 13.7204,
+        "tools_s": 2.0847,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.0315,
+        "llm_est_decode_s": 10.6889,
+        "prompt_tokens": 48616,
+        "completion_tokens": 481,
+        "total_tokens": 49097
+      },
+      {
+        "step": 3,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 19.5172,
+        "llm_s": 19.1569,
+        "tools_s": 0.2911,
+        "images_attach_s": 0.0062,
+        "llm_est_prefill_s": 1.8458,
+        "llm_est_decode_s": 17.3111,
+        "prompt_tokens": 48835,
+        "completion_tokens": 779,
+        "total_tokens": 49614
+      },
+      {
+        "step": 4,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 6.7095,
+        "llm_s": 6.6074,
+        "tools_s": 0.0052,
+        "images_attach_s": 0.0114,
+        "llm_est_prefill_s": 2.6963,
+        "llm_est_decode_s": 3.9111,
+        "prompt_tokens": 6856,
+        "completion_tokens": 176,
+        "total_tokens": 7032
+      },
+      {
+        "step": 5,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 16.0738,
+        "llm_s": 16.0428,
+        "tools_s": 0.0067,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.5084,
+        "llm_est_decode_s": 12.5333,
+        "prompt_tokens": 9599,
+        "completion_tokens": 564,
+        "total_tokens": 10163
+      },
+      {
+        "step": 6,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 8.766,
+        "llm_s": 8.2863,
+        "tools_s": 0.4464,
+        "images_attach_s": 0.0105,
+        "llm_est_prefill_s": 0.4863,
+        "llm_est_decode_s": 7.8,
+        "prompt_tokens": 9829,
+        "completion_tokens": 351,
+        "total_tokens": 10180
+      },
+      {
+        "step": 7,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 6.3242,
+        "llm_s": 6.2852,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0209,
+        "llm_est_prefill_s": 0.8407,
+        "llm_est_decode_s": 5.4444,
+        "prompt_tokens": 6903,
+        "completion_tokens": 245,
+        "total_tokens": 7148
+      },
+      {
+        "step": 8,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 18.9195,
+        "llm_s": 18.8776,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.1664,
+        "llm_est_decode_s": 18.7111,
+        "prompt_tokens": 9637,
+        "completion_tokens": 842,
+        "total_tokens": 10479
+      },
+      {
+        "step": 9,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 10.2531,
+        "llm_s": 10.2094,
+        "tools_s": 0.0088,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0094,
+        "llm_est_decode_s": 10.2,
+        "prompt_tokens": 9891,
+        "completion_tokens": 459,
+        "total_tokens": 10350
+      },
+      {
+        "step": 10,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 12.2988,
+        "llm_s": 11.1438,
+        "tools_s": 1.0028,
+        "images_attach_s": 0.1274,
+        "llm_est_prefill_s": 0.6105,
+        "llm_est_decode_s": 10.5333,
+        "prompt_tokens": 10219,
+        "completion_tokens": 474,
+        "total_tokens": 10693
+      },
+      {
+        "step": 11,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 17.4903,
+        "llm_s": 15.2853,
+        "tools_s": 2.0972,
+        "images_attach_s": 0.0852,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 15.2853,
+        "prompt_tokens": 6853,
+        "completion_tokens": 731,
+        "total_tokens": 7584
+      },
+      {
+        "step": 12,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 17.2836,
+        "llm_s": 15.3909,
+        "tools_s": 1.6008,
+        "images_attach_s": 0.0554,
+        "llm_est_prefill_s": 1.102,
+        "llm_est_decode_s": 14.2889,
+        "prompt_tokens": 12234,
+        "completion_tokens": 643,
+        "total_tokens": 12877
+      },
+      {
+        "step": 13,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 12.3706,
+        "llm_s": 11.9567,
+        "tools_s": 0.02,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.7122,
+        "llm_est_decode_s": 8.2444,
+        "prompt_tokens": 14799,
+        "completion_tokens": 371,
+        "total_tokens": 15170
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "工具契约",
+      "title": "为 save_text_file 注入强类型 JSON Schema 与必填字段模板",
+      "target_files": [
+        "agent/tools/save_text_file.py",
+        "agent/prompts/part_a_hints.md"
+      ],
+      "concrete_steps": [
+        "在 agent/tools/save_text_file.py 中定义 Pydantic BaseModel，强制声明 region_hint、visual_cues、reference_text 为必填字段",
+        "在 agent/prompts/part_a_hints.md 的系统提示词末尾追加该 JSON Schema 定义及 1 个完整合规示例",
+        "修改工具路由层的参数校验逻辑，在 LLM 调用前拦截缺失必填字段的请求并返回结构化错误，避免触发 plan-guard 后置拦截与无效重试"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 231.77,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 404703,
+      "completion_tokens": 16724,
+      "total_tokens": 421427,
+      "reasoning_tokens": 7204
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 287512,
+      "completion_tokens": 7313,
+      "total_tokens": 294825
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 692215,
+      "completion_tokens": 24037,
+      "total_tokens": 716252
+    },
+    "cursor_apply": {}
+  }
+}

@@ -20,11 +20,13 @@ import datetime as _dt
 import json
 import math
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from PIL import Image
 from rich.console import Console
 from rich.panel import Panel
 
@@ -50,6 +52,9 @@ class AgentStep:
     assistant_content: str
     tool_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
+    timing: dict[str, float] = field(default_factory=dict)
+    tool_timing: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +66,17 @@ class AgentRun:
     run_dir: Path | None = None
     # Set when the run aborts on an uncaught exception (still persisted).
     last_error: str | None = None
+    part_timing: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass
+class WorkflowPlanStep:
+    step_id: str
+    title: str
+    objective: str
+    done_any_artifacts: list[str] = field(default_factory=list)
+    allowed_tools: list[str] = field(default_factory=list)
+    next_action_hint: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -79,6 +95,11 @@ class Agent:
         self.client = LLMClient(cfg)
         self.console = console or Console()
         self.system_prompt = system_prompt or SYSTEM_PROMPT_TP_LOCATE
+        self._initial_task_compacted = False
+        self._run_inputs: dict[str, Any] = {}
+        from .logging_setup import get_logger, setup_project_logging
+        setup_project_logging()
+        self.log = get_logger(f"{__name__}.Agent")
 
     # ------------------------------------------------------------------ #
     # Public API
@@ -87,7 +108,7 @@ class Agent:
     def run(self, question: str,
             inputs: dict[str, Any] | None = None,
             run_name: str | None = None,
-            event_sink: Any | None = None) -> AgentRun:
+            event_sink: Callable[[str, dict[str, Any]], None] | None = None) -> AgentRun:
         """Execute the agent loop for a single task.
 
         `inputs` is a free-form dict. Keys whose value is a path ending in
@@ -104,21 +125,19 @@ class Agent:
 
         run_dir = self._prepare_run_dir(run_name)
         q_eff = self._effective_task_question(question)
+        self._run_inputs = dict(inputs or {})
 
-        def emit(event_type: str, payload: dict[str, Any]) -> None:
+        def emit_event(event_type: str, payload: dict[str, Any]) -> None:
             if event_sink is None:
                 return
             try:
                 event_sink(event_type, payload)
             except Exception:
-                # UI event streaming is best-effort and must not break a run.
+                # Service-side event delivery must never break agent execution.
                 pass
 
-        emit("agent.run_dir", {
-            "run_dir": str(run_dir),
-            "workspace": str(self.cfg.workspace_dir),
-            "workflow_mode": self.cfg.workflow_mode,
-        })
+        emit_event("agent.run_dir", {"run_dir": str(run_dir)})
+        self.log.info("Program start run_dir=%s workflow=%s", str(run_dir), self.cfg.workflow_mode)
         self.console.print(Panel.fit(
             f"[bold]model[/bold] = {self.cfg.model}\n"
             f"[bold]workspace[/bold] = {self.cfg.workspace_dir}\n"
@@ -134,40 +153,139 @@ class Agent:
             workspace=self.cfg.workspace_dir,
             input_paths={k: v for k, v in (inputs or {}).items() if isinstance(v, str)},
             workflow_mode=getattr(self.cfg, "workflow_mode", "default"),
+            run_started_at=time.time(),
         )
         self._log_jsonl(run_dir, "messages.init.jsonl", messages)
 
         result = AgentRun(task_question=q_eff, run_dir=run_dir)
         tools_schema = self.registry.openai_schema() if self.cfg.use_native_tools else None
         run_exception: BaseException | None = None
+        self._run_started_at = time.time()
+        phase_steps: dict[str, list[AgentStep]] = {}
+        current_phase: str | None = None
+        recent_tool_signatures: list[str] = []
+        plan_steps: list[WorkflowPlanStep] = []
+        plan_idx = 0
+        if bool(getattr(self.cfg, "hierarchical_agent_mode", True)):
+            plan_steps = self._build_workflow_plan(inputs or {})
+            plan_idx = self._advance_plan_index(plan_steps, 0)
+            try:
+                (run_dir / "planner_plan.json").write_text(
+                    json.dumps(
+                        [
+                            {
+                                "step_id": s.step_id,
+                                "title": s.title,
+                                "objective": s.objective,
+                                "done_any_artifacts": s.done_any_artifacts,
+                            }
+                            for s in plan_steps
+                        ],
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
 
         try:
             for step_idx in range(self.cfg.max_steps):
-                self._compact_old_inline_images(messages)
+                step_t0 = time.time()
+                self.log.info("Step start step=%s", step_idx)
+                self._compact_context_for_step(messages, step_idx)
+                emit_event("agent.waiting", {"step": step_idx})
+                if plan_steps:
+                    plan_idx = self._advance_plan_index(plan_steps, plan_idx)
+                    self._upsert_planner_step_message(messages, plan_steps, plan_idx)
+                step_tools_schema = (
+                    self._phase_tools_schema(plan_steps, plan_idx)
+                    if self.cfg.use_native_tools
+                    else None
+                )
+                step_input_messages = self._snapshot_messages(messages)
                 t0 = time.time()
-                emit("agent.waiting", {
-                    "step": step_idx,
-                    "message_count": len(messages),
-                    "status": "waiting_for_model",
-                })
-                reply = self.client.chat(messages, tools_schema=tools_schema)
-                dt = time.time() - t0
+                reply = self.client.chat(messages, tools_schema=step_tools_schema or tools_schema)
+                llm_dt = time.time() - t0
+                llm_breakdown = dict(reply.timing or {})
+                llm_usage = dict(reply.usage or {})
 
-                self._render_assistant(step_idx, reply, dt)
+                self._render_assistant(step_idx, reply, llm_dt)
                 messages.append(reply.raw_message)
 
                 if not reply.tool_calls:
-                    emit("agent.assistant", {
-                        "step": step_idx,
-                        "content": reply.content,
-                        "tool_calls": [],
-                    })
+                    step_timing = {
+                        "llm_s": round(llm_dt, 4),
+                        "tools_s": 0.0,
+                        "images_attach_s": 0.0,
+                        "step_total_s": round(time.time() - step_t0, 4),
+                    }
+                    if llm_breakdown:
+                        step_timing["llm_prep_s"] = round(
+                            float(llm_breakdown.get("prep_s", 0.0)), 4
+                        )
+                        step_timing["llm_api_call_s"] = round(
+                            float(llm_breakdown.get("api_call_s", 0.0)), 4
+                        )
+                        step_timing["llm_retry_sleep_s"] = round(
+                            float(llm_breakdown.get("retry_sleep_s", 0.0)), 4
+                        )
+                        step_timing["llm_parse_s"] = round(
+                            float(llm_breakdown.get("parse_s", 0.0)), 4
+                        )
+                        step_timing["llm_completion_tokens"] = round(
+                            float(llm_breakdown.get("completion_tokens", 0.0)), 4
+                        )
+                        step_timing["llm_est_prefill_s"] = round(
+                            float(llm_breakdown.get("est_prefill_s", 0.0)), 4
+                        )
+                        step_timing["llm_est_decode_s"] = round(
+                            float(llm_breakdown.get("est_decode_s", 0.0)), 4
+                        )
                     result.steps.append(AgentStep(
                         index=step_idx,
                         assistant_content=reply.content,
                         tool_calls=[],
                         tool_results=[],
+                        timing=step_timing,
+                        tool_timing=[],
+                        usage=llm_usage,
                     ))
+                    self._append_step_record(
+                        run_dir,
+                        {
+                            "index": step_idx,
+                            "input_messages": step_input_messages,
+                            "assistant_raw_message": reply.raw_message,
+                            "assistant_content": reply.content,
+                            "assistant_tool_calls": [],
+                            "tool_results": [],
+                            "timing": step_timing,
+                            "usage": llm_usage,
+                        },
+                    )
+                    self._append_agent_return_log(
+                        run_dir=run_dir,
+                        step_idx=step_idx,
+                        assistant_content=reply.content,
+                        final_answer=None,
+                    )
+                    self._append_plain_log(
+                        run_dir=run_dir,
+                        message=self._format_step_plain_log(
+                            step_idx=step_idx,
+                            step_timing=step_timing,
+                            assistant_content=reply.content,
+                            final_answer=None,
+                        ),
+                    )
+                    self._render_step_timing(step_idx, step_timing, [])
+                    emit_event("agent.step", {
+                        "step": step_idx,
+                        "tool_calls": [],
+                        "tool_results": [],
+                        "final": False,
+                    })
                     # Some models occasionally emit an empty assistant turn.
                     # Nudge once to either continue with tools or terminate
                     # cleanly via `finish`, instead of silently stopping.
@@ -184,31 +302,90 @@ class Agent:
 
                 tool_call_payload: list[dict[str, Any]] = []
                 tool_result_payload: list[dict[str, Any]] = []
+                tool_timing_payload: list[dict[str, Any]] = []
                 attached_images: list[str] = []
                 final_answer: Any = None
+                tools_t0 = time.time()
 
                 for call in reply.tool_calls:
+                    block_reason = (
+                        self._is_call_blocked_by_plan(call, plan_steps, plan_idx)
+                        if plan_steps
+                        else None
+                    )
+                    repeated_block = self._append_repetition_guard(
+                        messages, call, recent_tool_signatures
+                    )
+                    if block_reason or repeated_block:
+                        result_obj = ToolResult(
+                            text=block_reason or (
+                                f"[loop-guard] Repeated `{call.name}` call blocked. "
+                                "Continue with the next required workflow action."
+                            ),
+                            ok=False,
+                            is_final=False,
+                            final_data=None,
+                        )
+                        tool_dt = 0.0
+                        self._render_tool(call, result_obj)
+                        context_tool_text = self._compress_tool_result_for_context(
+                            call.name,
+                            result_obj.text,
+                        )
+                        if self.cfg.use_native_tools:
+                            messages.append(self.client.tool_result_message(
+                                tool_call_id=call.id,
+                                content=context_tool_text,
+                            ))
+                        else:
+                            messages.append(self.client.user_message(
+                                f"[tool-result name={call.name} id={call.id}]\n"
+                                f"{context_tool_text}"
+                            ))
+                        tool_call_payload.append({
+                            "id": call.id,
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        })
+                        tool_result_payload.append({
+                            "id": call.id,
+                            "ok": result_obj.ok,
+                            "duration_s": round(tool_dt, 4),
+                            "text": truncate(result_obj.text, 2000),
+                            "images": [],
+                            "is_final": False,
+                        })
+                        tool_timing_payload.append({
+                            "id": call.id,
+                            "name": call.name,
+                            "ok": result_obj.ok,
+                            "duration_s": round(tool_dt, 4),
+                        })
+                        continue
                     exec_arguments: Any = call.arguments
                     if call.name == "finish" and isinstance(call.arguments, dict):
                         exec_arguments = normalize_finish_arguments(call.arguments)
+                    tool_t0 = time.time()
                     result_obj = self.registry.run(call.name, exec_arguments)
+                    tool_dt = time.time() - tool_t0
+                    finish_contract_errors: list[str] = []
                     # Hard guardrails: if model tries to finish without required
                     # skill artifacts/evidence, reject and ask it to continue.
                     if call.name == "finish" and result_obj.is_final:
-                        contract_errors = self._validate_skill_contract()
-                        contract_errors.extend(
+                        finish_contract_errors = self._validate_skill_contract()
+                        finish_contract_errors.extend(
                             self._validate_finish_answer(
                                 exec_arguments.get("answer")
                                 if isinstance(exec_arguments, dict)
                                 else None,
                             )
                         )
-                        if contract_errors:
+                        if finish_contract_errors:
                             result_obj = ToolResult(
                                 text=(
                                     "[contract-error] finish was rejected because required "
                                     "skill artifacts are missing:\n- "
-                                    + "\n- ".join(contract_errors)
+                                    + "\n- ".join(finish_contract_errors)
                                     + "\nPlease continue tool calls to produce the missing "
                                       "evidence, then call finish again."
                                 ),
@@ -217,17 +394,26 @@ class Agent:
                                 final_data=None,
                             )
                     self._render_tool(call, result_obj)
+                    self._maybe_emit_python_error_hint(messages, call, result_obj)
+                    context_tool_text = self._compress_tool_result_for_context(
+                        call.name,
+                        result_obj.text,
+                    )
                     if self.cfg.use_native_tools:
                         messages.append(self.client.tool_result_message(
                             tool_call_id=call.id,
-                            content=result_obj.text,
+                            content=context_tool_text,
                         ))
                     else:
                         # Fallback: non-native providers often reject role=tool,
                         # so we feed the result back as a user message.
                         messages.append(self.client.user_message(
                             f"[tool-result name={call.name} id={call.id}]\n"
-                            f"{result_obj.text}"
+                            f"{context_tool_text}"
+                        ))
+                    if call.name == "finish" and finish_contract_errors:
+                        messages.append(self.client.user_message(
+                            self._build_finish_retry_hint(finish_contract_errors)
                         ))
                     tool_call_payload.append({
                         "id": call.id,
@@ -239,40 +425,26 @@ class Agent:
                     tool_result_payload.append({
                         "id": call.id,
                         "ok": result_obj.ok,
+                        "duration_s": round(tool_dt, 4),
                         "text": truncate(result_obj.text, 2000),
                         "images": result_obj.images,
                         "is_final": result_obj.is_final,
                     })
-                    attached_images.extend(result_obj.images)
-                    emit("agent.step", {
-                        "step": step_idx,
-                        "assistant_content": reply.content,
-                        "tool_call": {
-                            "id": call.id,
-                            "name": call.name,
-                            "arguments": exec_arguments
-                            if isinstance(exec_arguments, dict)
-                            else call.arguments,
-                        },
-                        "tool_result": {
-                            "ok": result_obj.ok,
-                            "text": truncate(result_obj.text, 2000),
-                            "images": result_obj.images,
-                            "is_final": result_obj.is_final,
-                        },
+                    tool_timing_payload.append({
+                        "id": call.id,
+                        "name": call.name,
+                        "ok": result_obj.ok,
+                        "duration_s": round(tool_dt, 4),
                     })
+                    attached_images.extend(result_obj.images)
                     if result_obj.is_final and final_answer is None:
                         final_answer = result_obj.final_data
 
-                result.steps.append(AgentStep(
-                    index=step_idx,
-                    assistant_content=reply.content,
-                    tool_calls=tool_call_payload,
-                    tool_results=tool_result_payload,
-                ))
+                tools_dt = time.time() - tools_t0
 
                 # If any tool produced images, push them in a follow-up user
                 # message so the VLM can look at them next turn.
+                attach_t0 = time.time()
                 if attached_images:
                     parts: list[dict[str, Any]] = [
                         self.client.text_part(
@@ -301,11 +473,92 @@ class Agent:
                             "Use these paths with tools in subsequent steps."
                         ))
                     messages.append(self.client.user_message(parts))
+                attach_dt = time.time() - attach_t0
+
+                step_timing = {
+                    "llm_s": round(llm_dt, 4),
+                    "tools_s": round(tools_dt, 4),
+                    "images_attach_s": round(attach_dt, 4),
+                    "step_total_s": round(time.time() - step_t0, 4),
+                }
+                if llm_breakdown:
+                    step_timing["llm_prep_s"] = round(
+                        float(llm_breakdown.get("prep_s", 0.0)), 4
+                    )
+                    step_timing["llm_api_call_s"] = round(
+                        float(llm_breakdown.get("api_call_s", 0.0)), 4
+                    )
+                    step_timing["llm_retry_sleep_s"] = round(
+                        float(llm_breakdown.get("retry_sleep_s", 0.0)), 4
+                    )
+                    step_timing["llm_parse_s"] = round(
+                        float(llm_breakdown.get("parse_s", 0.0)), 4
+                    )
+                    step_timing["llm_completion_tokens"] = round(
+                        float(llm_breakdown.get("completion_tokens", 0.0)), 4
+                    )
+                    step_timing["llm_est_prefill_s"] = round(
+                        float(llm_breakdown.get("est_prefill_s", 0.0)), 4
+                    )
+                    step_timing["llm_est_decode_s"] = round(
+                        float(llm_breakdown.get("est_decode_s", 0.0)), 4
+                    )
+                result.steps.append(AgentStep(
+                    index=step_idx,
+                    assistant_content=reply.content,
+                    tool_calls=tool_call_payload,
+                    tool_results=tool_result_payload,
+                    timing=step_timing,
+                    tool_timing=tool_timing_payload,
+                    usage=llm_usage,
+                ))
+                self._append_step_record(
+                    run_dir,
+                    {
+                        "index": step_idx,
+                        "input_messages": step_input_messages,
+                        "assistant_raw_message": reply.raw_message,
+                        "assistant_content": reply.content,
+                        "assistant_tool_calls": tool_call_payload,
+                        "tool_results": tool_result_payload,
+                        "timing": step_timing,
+                        "usage": llm_usage,
+                    },
+                )
+                self._append_agent_return_log(
+                    run_dir=run_dir,
+                    step_idx=step_idx,
+                    assistant_content=reply.content,
+                    final_answer=final_answer,
+                )
+                self._append_plain_log(
+                    run_dir=run_dir,
+                    message=self._format_step_plain_log(
+                        step_idx=step_idx,
+                        step_timing=step_timing,
+                        assistant_content=reply.content,
+                        final_answer=final_answer,
+                    ),
+                )
+                self._render_step_timing(step_idx, step_timing, tool_timing_payload)
+                emit_event("agent.step", {
+                    "step": step_idx,
+                    "tool_calls": tool_call_payload,
+                    "tool_results": tool_result_payload,
+                    "final": final_answer is not None,
+                })
+                latest = result.steps[-1]
+                current_phase = self._maybe_emit_phase_summary(
+                    messages=messages,
+                    phase_steps=phase_steps,
+                    current_phase=current_phase,
+                    latest_step=latest,
+                )
 
                 if final_answer is not None:
                     result.final_answer = final_answer
                     result.stopped_reason = "finish-tool-called"
-                    emit("agent.final", {
+                    emit_event("agent.final", {
                         "final_answer": final_answer,
                         "stopped_reason": result.stopped_reason,
                         "run_dir": str(run_dir),
@@ -317,24 +570,36 @@ class Agent:
             run_exception = e
             result.stopped_reason = f"exception:{type(e).__name__}"
             result.last_error = str(e)[:8000]
-            emit("agent.failed", {
+            emit_event("agent.failed", {
                 "error": result.last_error,
                 "stopped_reason": result.stopped_reason,
                 "run_dir": str(run_dir),
             })
         finally:
+            result.part_timing = self._compute_part_timing(result)
             self._persist_run(run_dir, result, messages)
             title = "VLM Agent done"
             if run_exception is not None:
                 title = "VLM Agent stopped (error logged)"
-            self.console.print(Panel.fit(
+            part_lines = self._render_part_timing_lines(result.part_timing)
+            done_body = (
                 f"[bold]stopped[/bold] = {result.stopped_reason}\n"
                 f"[bold]steps[/bold]   = {len(result.steps)}\n"
-                f"[bold]answer[/bold]  = "
-                f"{json.dumps(result.final_answer, ensure_ascii=False) if result.final_answer else '(none)'}",
+                + (f"{part_lines}\n" if part_lines else "")
+                + f"[bold]answer[/bold]  = "
+                + f"{json.dumps(result.final_answer, ensure_ascii=False) if result.final_answer else '(none)'}"
+            )
+            self.console.print(Panel.fit(
+                done_body,
                 title=title,
             ))
 
+        self.log.info(
+            "Program end stopped_reason=%s steps=%s",
+            result.stopped_reason,
+            len(result.steps),
+        )
+        self._write_run_summary(result, run_name, self.cfg, self._run_started_at)
         if run_exception is not None:
             raise run_exception
         return result
@@ -342,6 +607,124 @@ class Agent:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def _write_run_summary(self, result: AgentRun, run_name: str | None,
+                           cfg: Config, run_started_at: float) -> None:
+        """Write a structured run analysis to run.log."""
+        try:
+            self.log.info("Run report starting steps=%d reason=%s",
+                         len(result.steps), result.stopped_reason)
+            lines = []
+            sep1 = "=" * 70
+            sep2 = "-" * 70
+            run_id = result.run_dir.name if result.run_dir else (run_name or "unknown")
+            task = run_name or "?"
+            steps_used = len(result.steps)
+            steps_max = cfg.max_steps
+            duration = time.time() - run_started_at
+            start_ts = _dt.datetime.fromtimestamp(run_started_at).strftime("%Y-%m-%d %H:%M:%S")
+            end_ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            is_ok = result.final_answer is not None
+            result_str = "SUCCEEDED" if is_ok else "FAILED"
+            if result.stopped_reason:
+                result_str += f" ({result.stopped_reason})"
+
+            lines.append(sep1)
+            lines.append("  RUN ANALYSIS")
+            lines.append(sep1)
+            lines.append(f"  Run ID      : {run_id}")
+            lines.append(f"  Task        : {task}")
+            lines.append(f"  Model       : {cfg.model}")
+            lines.append(f"  Workflow    : {cfg.workflow_mode}")
+            lines.append(f"  Start       : {start_ts}")
+            lines.append(f"  End         : {end_ts}")
+            lines.append(f"  Duration    : {duration:.1f}s ({duration/60:.1f} min)")
+            lines.append(f"  Steps       : {steps_used} / {steps_max}"
+                        + (" (max reached)" if result.stopped_reason == "max-steps-reached" else ""))
+            lines.append(f"  Result      : {result_str}")
+            if result.last_error:
+                lines.append(f"  Last Error  : {truncate(result.last_error, 140)}")
+            lines.append("")
+
+            if not result.steps:
+                lines.append("  No steps executed.")
+                lines.append(sep1)
+                self.log.info("\n".join(lines))
+                return
+
+            pt = self._compute_part_timing(result)
+            phase_order = ["part0", "partb", "parta", "partc", "partd", "unknown"]
+            labels = {"part0": "Part 0 (PDF search & mark)", "partb": "Part B (Assembly IC)",
+                      "parta": "Part A (Board IC)", "partc": "Part C (Anchors & mapping)",
+                      "partd": "Part D (Align & finish)", "unknown": "unknown / other"}
+            total_s = pt.get("total_s", 1.0) or 1.0
+            lines.append(sep2)
+            lines.append("  EXECUTION TIMELINE")
+            lines.append(sep2)
+            phase_steps: dict[str, list[int]] = {p: [] for p in phase_order}
+            for s in result.steps:
+                ph = self._infer_step_part(s)
+                phase_steps.setdefault(ph, []).append(s.index)
+            for ph in phase_order:
+                if ph not in phase_steps and pt.get(f"{ph}_s", 0.0) == 0.0:
+                    continue
+                pts = pt.get(f"{ph}_s", 0.0)
+                pct = pts / total_s * 100 if total_s > 0 else 0.0
+                si = phase_steps.get(ph, [])
+                rng = (f"steps {min(si):>3}-{max(si):<3}" if len(si) > 1
+                       else f"step  {si[0]:>3}" if si else "(none)")
+                lines.append(f"  {labels.get(ph, ph):<28} {rng}   {pts:>7.1f}s  {pct:>5.0f}%")
+            lines.append(f"  {'-' * 52}")
+            lines.append(f"  {'Total:':28}              {total_s:>7.1f}s")
+            lines.append("")
+
+            lines.append(sep2)
+            lines.append("  STEP SUMMARY")
+            lines.append(sep2)
+            hdr = f"  {'Step':>4}  {'Phase':<7}  {'VLM(s)':>7}  {'Tool(s)':>7}  {'Tool':<36}  {'Result':<10}"
+            lines.append(hdr)
+            lines.append(f"  {'-' * 4}  {'-' * 7}  {'-' * 7}  {'-' * 7}  {'-' * 36}  {'-' * 10}")
+            for s in result.steps[:50]:
+                ph = self._infer_step_part(s)
+                vlm_s = s.timing.get("llm_s", 0.0) if s.timing else 0.0
+                tools_s = s.timing.get("tools_s", 0.0) if s.timing else 0.0
+                t_names = [c.get("name", "?") for c in s.tool_calls[:3]]
+                t_str = ", ".join(t_names)[:35]
+                trs = s.tool_results
+                if not trs:
+                    step_ok = "ok"
+                else:
+                    oks = [r.get("ok", True) for r in trs]
+                    texts = " ".join([r.get("text", "") for r in trs])
+                    if any("[contract-error]" in (r.get("text", "") or "") for r in trs):
+                        step_ok = "rejected"
+                    elif any("[plan-guard]" in (r.get("text", "") or "") for r in trs):
+                        step_ok = "blocked"
+                    elif not all(oks):
+                        step_ok = "failed"
+                    else:
+                        step_ok = "ok"
+                lines.append(f"  {s.index:>4}  {ph:<7}  {vlm_s:>6.1f}  {tools_s:>6.1f}  {t_str:<36}  {step_ok:<10}")
+            lines.append("")
+
+            if not is_ok:
+                lines.append(sep2)
+                lines.append("  FAILURE ANALYSIS")
+                lines.append(sep2)
+                if result.stopped_reason == "max-steps-reached":
+                    last = result.steps[-1] if result.steps else None
+                    lt = (last.tool_calls or [{}])[-1].get("name", "?") if last else "?"
+                    lines.append(f"  Cause: Reached max steps ({steps_max}) without completing.")
+                    lines.append(f"  Last tool: {lt}")
+                elif result.last_error:
+                    lines.append(f"  Cause: {result.stopped_reason}")
+                    lines.append(f"  Error: {result.last_error[:200]}")
+                lines.append("")
+
+            lines.append(sep1)
+            self.log.info("\n".join(lines))
+        except BaseException:
+            pass
 
     _IMG_EXT = {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tiff"}
 
@@ -451,6 +834,1083 @@ class Agent:
             protected_last = set(image_user_indices[-1:])
             _strip_from_oldest(protected_last)
 
+    @staticmethod
+    def _message_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            out: list[str] = []
+            for p in content:
+                if isinstance(p, dict) and p.get("type") == "text":
+                    t = p.get("text")
+                    if isinstance(t, str):
+                        out.append(t)
+            return "\n".join(out)
+        return ""
+
+    def _set_message_text(self, msg: dict[str, Any], text: str) -> None:
+        msg["content"] = [self.client.text_part(text)]
+
+    def _build_task_summary_text(self, task_text: str) -> str:
+        lines = [ln.rstrip() for ln in task_text.splitlines() if ln.strip()]
+        out: list[str] = [
+            "[task-summary]",
+            "Context was compacted to reduce repeated prompt tokens.",
+        ]
+        kept = 0
+        for ln in lines:
+            keep = False
+            if ln.startswith("## Task") or ln.startswith("## Provided inputs"):
+                keep = True
+            if ln.lstrip().startswith("- [image]") or ln.lstrip().startswith("- [file]"):
+                keep = True
+            low = ln.lower()
+            if any(k in low for k in ("mandatory", "must", "finish", "step", "debug/")):
+                keep = True
+            if keep:
+                out.append(ln)
+                kept += 1
+            if kept >= 40:
+                break
+        summary = "\n".join(out)
+        return truncate(summary, 2200)
+
+    def _compact_message_window(self, messages: list[dict[str, Any]]) -> None:
+        keep_recent = max(4, int(getattr(self.cfg, "context_keep_recent_turns", 10)))
+        if len(messages) <= keep_recent + 2:
+            return
+        tail_indices = set(range(max(0, len(messages) - keep_recent), len(messages)))
+        keep_indices: set[int] = set()
+        for i, m in enumerate(messages):
+            if i == 0:
+                keep_indices.add(i)
+                continue
+            txt = self._message_text(m.get("content"))
+            if txt.startswith("[phase-summary]") or txt.startswith("[global-summary]") or txt.startswith("[finish-retry-diff]"):
+                keep_indices.add(i)
+        keep_indices.update(tail_indices)
+        compacted = [messages[i] for i in range(len(messages)) if i in keep_indices]
+        messages[:] = compacted
+
+    def _compact_context_for_step(self, messages: list[dict[str, Any]], step_idx: int) -> None:
+        self._compact_old_inline_images(messages)
+        drop_after = int(getattr(self.cfg, "context_drop_initial_after_step", 0))
+        if (
+            drop_after > 0
+            and step_idx >= drop_after
+            and not self._initial_task_compacted
+            and len(messages) >= 2
+            and messages[1].get("role") == "user"
+        ):
+            task_text = self._message_text(messages[1].get("content"))
+            if task_text:
+                self._set_message_text(messages[1], self._build_task_summary_text(task_text))
+                self._initial_task_compacted = True
+        self._compact_message_window(messages)
+
+    def _build_workflow_plan(self, inputs: dict[str, Any]) -> list[WorkflowPlanStep]:
+        # Prefer explicit machine-readable plan when provided.
+        candidate_paths: list[Path] = []
+        in_task = inputs.get("workflow_plan_file")
+        if isinstance(in_task, str) and in_task.strip():
+            candidate_paths.append(Path(in_task.strip()))
+        for cp in candidate_paths:
+            try:
+                if cp.is_file():
+                    loaded = self._load_workflow_plan_file(cp)
+                    if loaded:
+                        return loaded
+            except Exception:
+                continue
+        return self._default_workflow_plan()
+
+    @staticmethod
+    def _load_workflow_plan_file(plan_path: Path) -> list[WorkflowPlanStep]:
+        obj = json.loads(plan_path.read_text(encoding="utf-8"))
+        steps_raw = obj.get("steps") if isinstance(obj, dict) else None
+        if not isinstance(steps_raw, list):
+            return []
+        out: list[WorkflowPlanStep] = []
+        for it in steps_raw:
+            if not isinstance(it, dict):
+                continue
+            sid = str(it.get("step_id", "")).strip()
+            title = str(it.get("title", "")).strip()
+            objective = str(it.get("objective", "")).strip()
+            if not sid or not title:
+                continue
+            done = it.get("done_any_artifacts") or []
+            allowed = it.get("allowed_tools") or []
+            out.append(
+                WorkflowPlanStep(
+                    step_id=sid,
+                    title=title,
+                    objective=objective,
+                    done_any_artifacts=[str(x) for x in done if isinstance(x, str)],
+                    allowed_tools=[str(x) for x in allowed if isinstance(x, str)],
+                    next_action_hint=str(it.get("next_action_hint", "")).strip(),
+                )
+            )
+        return out
+
+    @staticmethod
+    def _default_workflow_plan() -> list[WorkflowPlanStep]:
+        return [
+            WorkflowPlanStep(
+                step_id="part0_signal_to_tp",
+                title="Part0-A infer target TP",
+                objective="Write debug/case10_signal_to_tp.json from user question + schematic evidence.",
+                done_any_artifacts=["debug/case10_signal_to_tp.json"],
+                allowed_tools=[
+                    "read_text_file", "view_image", "search_pdf_text", "save_text_file",
+                    "run_python", "list_files",
+                ],
+            ),
+            WorkflowPlanStep(
+                step_id="part0_pdf_search_and_mark",
+                title="Part0-B/C search TP in assembly PDF and green-circle it",
+                objective="Produce target TP search JSON and green-circled assembly image.",
+                done_any_artifacts=[
+                    "debug/case10_target_tp_pdf_search.json",
+                    "debug/case10_assembly_drawing.png",
+                    "debug/case10_target_tp_work_roi.png",
+                    "debug/case10_assembly_drawing_tp_marked.png",
+                ],
+                allowed_tools=[
+                    "search_pdf_text", "run_python",
+                    "mark_tp_on_assembly_from_pdf_hit", "pdf_page_to_image", "view_image",
+                ],
+            ),
+            WorkflowPlanStep(
+                step_id="partb_locator_largest_ic",
+                title="PartB assembly largest IC",
+                objective="Create case10_assembly_largest_ic_box.png and case10_assembly_largest_ic.json.",
+                done_any_artifacts=[
+                    "debug/case10_assembly_vlm_hints.json",
+                    "debug/case10_assembly_opencv_debug.png",
+                    "debug/case10_assembly_largest_ic_box.png",
+                    "debug/case10_assembly_largest_ic.json",
+                ],
+                allowed_tools=["view_image", "save_text_file", "run_python", "detect_largest_ic_on_assembly_from_vlm_hint", "annotate_image", "read_text_file"],
+            ),
+            WorkflowPlanStep(
+                step_id="parta_board_largest_ic",
+                title="PartA board largest IC",
+                objective="VLM gives board ROI first, then OpenCV runs inside ROI on stable horizontal board frame.",
+                done_any_artifacts=[
+                    "debug/case10_vlm_hints.json",
+                    "debug/case10_opencv_debug.png",
+                    "debug/case10_largest_ic_box.png",
+                    "debug/case10_largest_ic.json",
+                ],
+                allowed_tools=["run_python", "detect_largest_ic_on_board_from_vlm_hint", "view_image", "save_text_file", "annotate_image", "read_text_file"],
+            ),
+            WorkflowPlanStep(
+                step_id="partd_case12_align_and_finish",
+                title="PartD case12 align + finish",
+                objective="Create case12 aligned outputs and final step08 artifacts, then finish.",
+                done_any_artifacts=[
+                    "debug/case12_board_points_aligned.json",
+                    "debug/step08_result.json",
+                    "debug/step08_final_tp.png",
+                ],
+                allowed_tools=["case12_build_and_align_from_step02_anchors", "emit_step08_from_case12_aligned", "run_python", "read_text_file", "annotate_image", "save_text_file", "finish", "view_image"],
+            ),
+        ]
+
+    def _artifact_exists(self, rel: str) -> bool:
+        ws = self.cfg.workspace_dir.resolve()
+        since = float(getattr(self, "_run_started_at", 0.0))
+        for p in (ws / rel, ws / "workspace" / rel):
+            if not p.exists():
+                continue
+            try:
+                st = p.stat()
+                # copy2 may preserve mtime from source; ctime captures creation/update on Windows.
+                latest_fs_ts = max(float(st.st_mtime), float(st.st_ctime))
+                if latest_fs_ts + 1e-3 >= since:
+                    return True
+            except OSError:
+                continue
+        return False
+
+    def _artifact_is_landscape(self, rel: str) -> bool | None:
+        ws = self.cfg.workspace_dir.resolve()
+        for p in (ws / rel, ws / "workspace" / rel):
+            if not p.exists():
+                continue
+            try:
+                with Image.open(p) as im:
+                    w, h = im.size
+                return bool(w >= h)
+            except Exception:  # noqa: BLE001
+                return None
+        return None
+
+    def _is_plan_step_done(self, step: WorkflowPlanStep) -> bool:
+        return bool(step.done_any_artifacts) and all(
+            self._artifact_exists(p) for p in step.done_any_artifacts
+        )
+
+    def _advance_plan_index(self, plan_steps: list[WorkflowPlanStep], idx: int) -> int:
+        cur = max(0, idx)
+        while cur < len(plan_steps) and self._is_plan_step_done(plan_steps[cur]):
+            cur += 1
+        return cur
+
+    def _upsert_planner_step_message(
+        self,
+        messages: list[dict[str, Any]],
+        plan_steps: list[WorkflowPlanStep],
+        plan_idx: int,
+    ) -> None:
+        kept: list[dict[str, Any]] = []
+        for m in messages:
+            if m.get("role") != "user":
+                kept.append(m)
+                continue
+            txt = self._message_text(m.get("content"))
+            if txt.startswith("[planner-step]"):
+                continue
+            kept.append(m)
+        messages[:] = kept
+
+        completed = [s.step_id for s in plan_steps[:plan_idx]]
+        if plan_idx >= len(plan_steps):
+            messages.append(self.client.user_message(
+                "[planner-step]\nAll planned phases are done; only final consistency check + finish."
+            ))
+            return
+
+        cur = plan_steps[plan_idx]
+        needed = ", ".join(cur.done_any_artifacts) if cur.done_any_artifacts else "(none)"
+        next_action = cur.next_action_hint or "Proceed with current phase required artifact generation."
+        allow_tools = ", ".join(cur.allowed_tools) if cur.allowed_tools else "(not specified)"
+        msg = (
+            "[planner-step]\n"
+            f"current_step_id: {cur.step_id}\n"
+            f"title: {cur.title}\n"
+            f"objective: {cur.objective}\n"
+            f"done_when_artifacts_exist: {needed}\n"
+            f"allowed_tools: {allow_tools}\n"
+            f"completed_steps: {', '.join(completed) if completed else '(none)'}\n"
+            f"next_action_hint: {next_action}\n"
+            "Do not redo completed steps."
+        )
+        messages.append(self.client.user_message(msg))
+
+    def _phase_tools_schema(
+        self,
+        plan_steps: list[WorkflowPlanStep],
+        plan_idx: int,
+    ) -> list[dict[str, Any]]:
+        """Dynamically narrow visible tools to the current plan phase."""
+        # No plan -> expose full schema (legacy behavior).
+        if not plan_steps:
+            return self.registry.openai_schema()
+
+        # Plan already done: keep only tools needed for final consistency + finish.
+        if plan_idx >= len(plan_steps):
+            final_allow = ("read_text_file", "view_image", "finish")
+            out: list[dict[str, Any]] = []
+            for name in final_allow:
+                t = self.registry.get(name)
+                if t is not None:
+                    out.append(t.to_openai_schema())
+            return out or self.registry.openai_schema()
+
+        current = plan_steps[plan_idx]
+        allowed = list(current.allowed_tools or [])
+        if not allowed:
+            return self.registry.openai_schema()
+
+        out: list[dict[str, Any]] = []
+        for name in allowed:
+            t = self.registry.get(name)
+            if t is not None:
+                out.append(t.to_openai_schema())
+        return out or self.registry.openai_schema()
+
+    def _is_call_blocked_by_plan(
+        self,
+        call: ToolInvocation,
+        plan_steps: list[WorkflowPlanStep],
+        plan_idx: int,
+    ) -> str | None:
+        if plan_idx >= len(plan_steps):
+            return None
+        current = plan_steps[plan_idx]
+        current_id = current.step_id
+        tool = call.name
+
+        if current_id == "parta_board_largest_ic" and tool == "list_files":
+            fb = self._run_inputs.get("front_board_photo")
+            fb_hint = str(fb).strip() if isinstance(fb, str) and str(fb).strip() else "INPUT_PATHS['front_board_photo']"
+            return (
+                "[plan-guard] `list_files` is disabled in PartA to avoid loops. "
+                "Use board source directly from `INPUT_PATHS['front_board_photo']` "
+                f"(current resolved hint: `{fb_hint}`), then call `view_image` on that board "
+                "source and write `debug/case10_vlm_hints.json`."
+            )
+
+        allowed = set(current.allowed_tools or [])
+        if allowed and tool not in allowed:
+            order_labels: list[str] = []
+            for s in plan_steps:
+                label = (
+                    s.step_id.replace("part0_signal_to_tp", "part0")
+                    .replace("part0_pdf_search_and_mark", "part0")
+                    .replace("partb_locator_largest_ic", "partB")
+                    .replace("parta_board_largest_ic", "partA")
+                    .replace("partd_case12_align_and_finish", "partD")
+                )
+                if not order_labels or order_labels[-1] != label:
+                    order_labels.append(label)
+            order_hint = " -> ".join(order_labels)
+            return (
+                f"[plan-guard] Tool `{tool}` is not allowed in phase `{current_id}`. "
+                f"Follow STANDARD_WORKFLOW order: {order_hint}."
+            )
+
+        # No PDF TP search beyond Part0.
+        if tool == "search_pdf_text" and not current_id.startswith("part0"):
+            return (
+                "[plan-guard] `search_pdf_text` is Part0-only in this workflow. "
+                "Do not go back to TP PDF search after Part0."
+            )
+        if tool == "pdf_draw_circle_then_rasterize":
+            if current_id.startswith("part0"):
+                return (
+                    "[plan-guard] `pdf_draw_circle_then_rasterize` is not the primary Part0 path. "
+                    "After `search_pdf_text` gets rect_pdf, do this exact sequence: "
+                    "1) `pdf_page_to_image` -> `debug/case10_assembly_drawing.png`; "
+                    "2) `run_python` to map rect_pdf->PNG ROI and write "
+                    "`debug/case10_target_tp_work_roi.png` + "
+                    "`debug/case10_assembly_drawing_tp_marked.png`; "
+                    "3) `view_image` the tp_marked PNG."
+                )
+            return (
+                "[plan-guard] `pdf_draw_circle_then_rasterize` is Part0-only and not allowed "
+                "in the current phase."
+            )
+        if current_id.startswith("part0") and tool == "pdf_page_to_image":
+            asm_page1_png = self._run_inputs.get("assembly_drawing_page1_png")
+            if isinstance(asm_page1_png, str) and asm_page1_png.strip():
+                return (
+                    "[plan-guard] Part0 for this case should use `assembly_drawing_page1_png` "
+                    "as the working image source. Use `run_python` to copy it to "
+                    "`debug/case10_assembly_drawing.png` instead of `pdf_page_to_image`."
+                )
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            out_path = str(args.get("out_path", "")).replace("\\", "/").lower()
+            if out_path and not out_path.endswith("debug/case10_assembly_drawing.png"):
+                return (
+                    "[plan-guard] In Part0, `pdf_page_to_image` must write exactly "
+                    "`debug/case10_assembly_drawing.png` (do not invent alternate filenames)."
+                )
+        if current_id == "part0_pdf_search_and_mark":
+            has_drawing = self._artifact_exists("debug/case10_assembly_drawing.png")
+            has_marked = self._artifact_exists("debug/case10_assembly_drawing_tp_marked.png")
+            has_search = self._artifact_exists("debug/case10_target_tp_pdf_search.json")
+            if has_search and not has_drawing and tool in {"read_text_file", "list_files"}:
+                return (
+                    "[plan-guard] TP PDF search JSON is already generated. "
+                    "Do not loop on file reads/listing now. Execute Part0 next action: "
+                    "call `mark_tp_on_assembly_from_pdf_hit` directly "
+                    "(optionally set `assembly_png_path=INPUT_PATHS['assembly_drawing_page1_png']`). "
+                    "The tool will materialize `debug/case10_assembly_drawing.png` automatically."
+                )
+            if has_search and not has_drawing and tool == "run_python" and isinstance(call.arguments, dict):
+                return (
+                    "[plan-guard] After `search_pdf_text`, do not use ad-hoc `run_python` "
+                    "for assembly copy/marking. Call `mark_tp_on_assembly_from_pdf_hit` directly "
+                    "(it will create `debug/case10_assembly_drawing.png` when needed)."
+                )
+            if has_drawing and not has_marked and tool in {"read_text_file", "list_files"}:
+                return (
+                    "[plan-guard] `case10_assembly_drawing.png` is ready but TP is not marked yet. "
+                    "Do not loop on file reads/listing. Execute "
+                    "`mark_tp_on_assembly_from_pdf_hit` now to generate "
+                    "`debug/case10_target_tp_work_roi.png` and `debug/case10_assembly_drawing_tp_marked.png`."
+                )
+            if has_search and has_drawing and not has_marked and tool == "run_python":
+                return (
+                    "[plan-guard] In Part0 TP marking, prefer the dedicated tool "
+                    "`mark_tp_on_assembly_from_pdf_hit` instead of ad-hoc `run_python`. "
+                    "Call `mark_tp_on_assembly_from_pdf_hit` now with search_json + assembly_png_path."
+                )
+            if tool == "run_python" and isinstance(call.arguments, dict):
+                code = str(call.arguments.get("code", ""))
+                # Prevent common TypeError: list indices must be integers or slices, not str.
+                if re.search(r"\bhits\s*\[\s*['\"][^'\"]+['\"]\s*\]", code):
+                    return (
+                        "[plan-guard] Detected risky list indexing pattern in Python code: "
+                        "`hits['...']`. In this step, `hits` is a LIST.\n"
+                        "Use safe pattern:\n"
+                        "- `hits = search_data.get('hits', [])`\n"
+                        "- `if not hits: raise RuntimeError(...)`\n"
+                        "- `hit = hits[0]`\n"
+                        "- then access `hit['rect_pdf']`, `hit['page']`, etc."
+                    )
+                if "get(\"hits\", {})" in code or "get('hits', {})" in code:
+                    return (
+                        "[plan-guard] `search_data.get('hits', {})` is risky here: default type must be LIST, not dict. "
+                        "Use `search_data.get('hits', [])`."
+                    )
+        if current_id == "partb_locator_largest_ic" and tool == "annotate_image":
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            src = str(args.get("path", "")).replace("\\", "/").lower()
+            out = str(args.get("out_path", "")).replace("\\", "/").lower()
+            points = args.get("points", [])
+            if not src.endswith("debug/case10_assembly_drawing_tp_marked.png"):
+                return (
+                    "[plan-guard] PartB final annotate must use source "
+                    "`debug/case10_assembly_drawing_tp_marked.png` "
+                    "(keep green TP circle + add red largest-IC box)."
+                )
+            if not out.endswith("debug/case10_assembly_largest_ic_box.png"):
+                return (
+                    "[plan-guard] PartB final annotate output must be "
+                    "`debug/case10_assembly_largest_ic_box.png`."
+                )
+            if isinstance(points, list):
+                for pt in points:
+                    if not isinstance(pt, dict):
+                        continue
+                    bb = pt.get("bbox")
+                    if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                        continue
+                    try:
+                        x1, y1, x2, y2 = [int(v) for v in bb]
+                    except Exception:  # noqa: BLE001
+                        continue
+                    bw, bh = (x2 - x1), (y2 - y1)
+                    if bw < 40 or bh < 40 or (bw * bh) < 2500:
+                        return (
+                            "[plan-guard] PartB final IC bbox looks too small for largest package "
+                            f"({bw}x{bh}). Expand work_roi (recommend >=20% margin around VLM ROI), "
+                            "rerun OpenCV in expanded ROI, then annotate again."
+                        )
+                    break
+        if current_id == "partb_locator_largest_ic" and tool == "run_python" and isinstance(call.arguments, dict):
+            has_hints = self._artifact_exists("debug/case10_assembly_vlm_hints.json")
+            has_cvdbg = self._artifact_exists("debug/case10_assembly_opencv_debug.png")
+            if has_hints and not has_cvdbg:
+                return (
+                    "[plan-guard] PartB should use deterministic tool "
+                    "`detect_largest_ic_on_assembly_from_vlm_hint` after VLM hints are ready. "
+                    "Call that tool now (work_margin_ratio=0.2) instead of ad-hoc run_python."
+                )
+            code = str(call.arguments.get("code", ""))
+            low_code = code.lower()
+            if "cv2.canny" in low_code:
+                return (
+                    "[plan-guard] PartB should reuse the previously successful baseline, not Canny-edge flow. "
+                    "Use grayscale + THRESH_BINARY_INV (~180) + MORPH_RECT 3x3 with dilate=1 "
+                    "inside work_roi, then contour area/aspect filtering."
+                )
+            if "touch" in low_code and "border" in low_code:
+                return (
+                    "[plan-guard] PartB edge-touch hard rejection caused regressions. "
+                    "Do not use strict border-touch elimination; keep area/aspect-based filtering first."
+                )
+        if current_id == "partb_locator_largest_ic" and tool == "save_text_file":
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            p = str(args.get("path", "")).replace("\\", "/").lower()
+            if p.endswith("debug/case10_assembly_spatial_description.md"):
+                return (
+                    "[plan-guard] PartB no longer requires `case10_assembly_spatial_description.md`. "
+                    "Write `debug/case10_assembly_vlm_hints.json` instead and proceed to OpenCV debug + annotate."
+                )
+            if p.endswith("debug/case10_assembly_vlm_hints.json"):
+                raw = args.get("content", "")
+                txt = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+                if "\"vlm_roi\"" in txt or "\"image_wh\"" in txt:
+                    return (
+                        "[plan-guard] `debug/case10_assembly_vlm_hints.json` must be "
+                        "`approx_bbox_norm`-only for geometry. "
+                        "Do not write `vlm_roi` or `image_wh`."
+                    )
+                if "approx_bbox_norm" not in txt:
+                    return (
+                        "[plan-guard] PartB sequence: after "
+                        "`view_image(debug/case10_assembly_drawing_tp_marked.png)`, "
+                        "write `debug/case10_assembly_vlm_hints.json` with required keys:\n"
+                        "- `approx_bbox_norm` = [x1n,y1n,x2n,y2n] in [0,1]\n"
+                        "- at least one of `region_hint` / `relative_to_tp` / `visual_cues`\n"
+                        "Then call `detect_largest_ic_on_assembly_from_vlm_hint`."
+                    )
+                try:
+                    obj = json.loads(txt)
+                except Exception:
+                    return (
+                        "[plan-guard] `debug/case10_assembly_vlm_hints.json` must be valid JSON "
+                        "and include semantic coarse hints (not bbox-only)."
+                    )
+                bbox = obj.get("approx_bbox_norm")
+                if (
+                    not isinstance(bbox, list)
+                    or len(bbox) != 4
+                    or any(not isinstance(v, (int, float)) for v in bbox)
+                ):
+                    return (
+                        "[plan-guard] `approx_bbox_norm` must be numeric [x1n, y1n, x2n, y2n]."
+                    )
+                x1n, y1n, x2n, y2n = [float(v) for v in bbox]
+                if not (0.0 <= x1n <= 1.0 and 0.0 <= y1n <= 1.0 and 0.0 <= x2n <= 1.0 and 0.0 <= y2n <= 1.0):
+                    return (
+                        "[plan-guard] `approx_bbox_norm` values must be within [0,1]."
+                    )
+                if x2n <= x1n or y2n <= y1n:
+                    return (
+                        "[plan-guard] `approx_bbox_norm` must satisfy x2>x1 and y2>y1."
+                    )
+                if not any(k in obj for k in ("region_hint", "relative_to_tp", "visual_cues")):
+                    return (
+                        "[plan-guard] `debug/case10_assembly_vlm_hints.json` must include at least one "
+                        "semantic coarse hint key: `region_hint` / `relative_to_tp` / `visual_cues` "
+                        "(similar to case10_vlm_roi_hints.md style), not bbox-only."
+                    )
+        if current_id == "partb_locator_largest_ic" and tool == "read_text_file":
+            has_hints = self._artifact_exists("debug/case10_assembly_vlm_hints.json")
+            has_cvdbg = self._artifact_exists("debug/case10_assembly_opencv_debug.png")
+            has_box = self._artifact_exists("debug/case10_assembly_largest_ic_box.png")
+            if has_hints and not has_cvdbg:
+                return (
+                    "[plan-guard] PartB already has VLM hints JSON. "
+                    "Do not loop on `read_text_file`; execute `run_python` now to convert "
+                    "approx_bbox_norm -> px and produce `debug/case10_assembly_opencv_debug.png`."
+                )
+            if has_cvdbg and not has_box:
+                return (
+                    "[plan-guard] PartB OpenCV debug is ready. "
+                    "Do not loop on `read_text_file`; call `annotate_image` now to write "
+                    "`debug/case10_assembly_largest_ic_box.png`."
+                )
+        if current_id == "parta_board_largest_ic" and tool == "save_text_file":
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            p = str(args.get("path", "")).replace("\\", "/").lower()
+            if p.endswith("debug/case10_spatial_description.md"):
+                return (
+                    "[plan-guard] PartA no longer uses `case10_spatial_description.md`. "
+                    "Write `debug/case10_vlm_hints.json` (or `debug/case10_board_vlm_hints.json`) "
+                    "with ROI hints after viewing board image."
+                )
+            if p.endswith("debug/case10_board_vlm_hints.json") or p.endswith("debug/case10_vlm_hints.json"):
+                raw = args.get("content", "")
+                txt = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+                if "\"vlm_roi\"" in txt or "\"image_wh\"" in txt:
+                    return (
+                        "[plan-guard] board hints JSON must be `approx_bbox_norm`-only for geometry. "
+                        "Do not write `vlm_roi` or `image_wh`."
+                    )
+                if "approx_bbox_norm" not in txt:
+                    return (
+                        "[plan-guard] board hints JSON must include `approx_bbox_norm` "
+                        "from VLM board inspection."
+                    )
+                try:
+                    obj = json.loads(txt)
+                except Exception:
+                    return (
+                        "[plan-guard] board hints JSON must be valid JSON "
+                        "and include semantic coarse hints."
+                    )
+                bbox = obj.get("approx_bbox_norm")
+                if (
+                    not isinstance(bbox, list)
+                    or len(bbox) != 4
+                    or any(not isinstance(v, (int, float)) for v in bbox)
+                ):
+                    return (
+                        "[plan-guard] board `approx_bbox_norm` must be numeric [x1n, y1n, x2n, y2n]."
+                    )
+                x1n, y1n, x2n, y2n = [float(v) for v in bbox]
+                if not (0.0 <= x1n <= 1.0 and 0.0 <= y1n <= 1.0 and 0.0 <= x2n <= 1.0 and 0.0 <= y2n <= 1.0):
+                    return (
+                        "[plan-guard] board `approx_bbox_norm` values must be within [0,1]."
+                    )
+                if x2n <= x1n or y2n <= y1n:
+                    return (
+                        "[plan-guard] board `approx_bbox_norm` must satisfy x2>x1 and y2>y1."
+                    )
+                if not any(k in obj for k in ("region_hint", "visual_cues", "reference_text")):
+                    return (
+                        "[plan-guard] board hints JSON must include at least one "
+                        "semantic coarse hint key: `region_hint` / `visual_cues` / `reference_text`."
+                    )
+        if current_id == "parta_board_largest_ic" and tool == "read_text_file":
+            has_hints = (
+                self._artifact_exists("debug/case10_vlm_hints.json")
+                or self._artifact_exists("debug/case10_board_vlm_hints.json")
+            )
+            has_cvdbg = self._artifact_exists("debug/case10_opencv_debug.png")
+            has_box = self._artifact_exists("debug/case10_largest_ic_box.png")
+            if has_hints and not has_cvdbg:
+                return (
+                    "[plan-guard] PartA already has board VLM hints JSON. "
+                    "Do not loop on `read_text_file`; execute `run_python` now to convert "
+                    "approx_bbox_norm -> px and produce `debug/case10_opencv_debug.png`."
+                )
+            if has_cvdbg and not has_box:
+                return (
+                    "[plan-guard] PartA OpenCV debug is ready. "
+                    "Do not loop on `read_text_file`; call `annotate_image` now to write "
+                    "`debug/case10_largest_ic_box.png`."
+                )
+        if current_id == "parta_board_largest_ic" and tool == "run_python":
+            has_hints = (
+                self._artifact_exists("debug/case10_vlm_hints.json")
+                or self._artifact_exists("debug/case10_board_vlm_hints.json")
+            )
+            has_cvdbg = self._artifact_exists("debug/case10_opencv_debug.png")
+            if has_hints and not has_cvdbg:
+                return (
+                    "[plan-guard] PartA should use deterministic tool "
+                    "`detect_largest_ic_on_board_from_vlm_hint` after VLM hints are ready. "
+                    "Call that tool now (work_margin_ratio=0.2) instead of ad-hoc run_python."
+                )
+        if current_id == "parta_board_largest_ic" and tool == "run_python" and isinstance(call.arguments, dict):
+            code = str(call.arguments.get("code", ""))
+            low_code = code.lower()
+            # Enforce stable board OpenCV baseline used by successful historical runs.
+            if "cv2.threshold" in low_code and re.search(r"threshold\s*\([^)]*,\s*(1[6-9]\d|2\d\d)\s*,", low_code):
+                return (
+                    "[plan-guard] PartA board OpenCV threshold looks too high and likely suppresses "
+                    "the dark IC region. Reuse legacy-stable path: THRESH_BINARY_INV around 60 "
+                    "or `opencv_ballpark` HSV-dark mode, then morphology and contour filters."
+                )
+            if "cv2.canny" in low_code:
+                return (
+                    "[plan-guard] PartA board IC detection should reuse the stable baseline from "
+                    "successful runs (gray + binary_inv threshold + dilate/erode), not Canny-edge path."
+                )
+            rotate_patterns = (
+                "cv2.rotate(",
+                "np.rot90(",
+                ".transpose(",
+                ".rotate(",
+                "ImageOps.exif_transpose(",
+            )
+            if any(pat in code for pat in rotate_patterns):
+                return (
+                    "[plan-guard] PartA should keep the physical board frame unchanged. "
+                    "Do not rotate/flip board images in this workflow; use "
+                    "`INPUT_PATHS['front_board_photo']` directly for VLM hints + deterministic IC tool."
+                )
+        if current_id == "parta_board_largest_ic" and tool == "annotate_image":
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            src = str(args.get("path", "")).replace("\\", "/").lower()
+            out = str(args.get("out_path", "")).replace("\\", "/").lower()
+            points = args.get("points", [])
+            fb = self._run_inputs.get("front_board_photo")
+            fb_norm = str(fb).replace("\\", "/").lower() if isinstance(fb, str) else ""
+            src_ok = (
+                "case10_board_landscape.png" in src
+                or "front_board_photo" in src
+                or (fb_norm and src == fb_norm)
+            )
+            if not src_ok:
+                return (
+                    "[plan-guard] PartA annotate source must be the board image itself "
+                    "(prefer `INPUT_PATHS['front_board_photo']`, compatibility: "
+                    "`debug/case10_board_landscape.png`)."
+                )
+            if not out.endswith("debug/case10_largest_ic_box.png"):
+                return (
+                    "[plan-guard] PartA final annotate output must be "
+                    "`debug/case10_largest_ic_box.png`."
+                )
+            if isinstance(points, list):
+                for pt in points:
+                    if not isinstance(pt, dict):
+                        continue
+                    bb = pt.get("bbox")
+                    if not (isinstance(bb, (list, tuple)) and len(bb) == 4):
+                        continue
+                    try:
+                        x1, y1, x2, y2 = [int(v) for v in bb]
+                    except Exception:  # noqa: BLE001
+                        continue
+                    bw, bh = (x2 - x1), (y2 - y1)
+                    if bw < 40 or bh < 40 or (bw * bh) < 2500:
+                        return (
+                            "[plan-guard] PartA final IC bbox looks too small for largest package "
+                            f"({bw}x{bh}). Expand board work_roi (recommend >=20% margin around VLM ROI), "
+                            "rerun OpenCV in expanded ROI, then annotate again."
+                        )
+                    break
+        if current_id in {"parta_board_largest_ic", "partd_case12_align_and_finish"} and tool == "run_python":
+            has_locator = self._artifact_exists("debug/case10_assembly_largest_ic_box.png")
+            has_board = self._artifact_exists("debug/case10_largest_ic_box.png")
+            if has_locator and has_board:
+                return (
+                    "[plan-guard] Do not use ad-hoc run_python copy scripts here. "
+                    "Call `case12_build_and_align_from_step02_anchors` directly with:\n"
+                    "- `locator_anchor_path=debug/case10_assembly_largest_ic_box.png`\n"
+                    "- `board_anchor_path=debug/case10_largest_ic_box.png`"
+                )
+        # Do not finish before PartD.
+        if current_id == "partd_case12_align_and_finish" and tool == "read_text_file":
+            has_graph = self._artifact_exists("debug/case12_step02_locator_graph.json")
+            has_aligned = self._artifact_exists("debug/case12_board_points_aligned.json")
+            has_step8_png = self._artifact_exists("debug/step08_final_tp.png")
+            has_step8_json = self._artifact_exists("debug/step08_result.json")
+            if has_graph and not has_aligned:
+                return (
+                    "[plan-guard] PartD direct path: graph is ready. "
+                    "Run align now to produce `debug/case12_board_points_aligned.json` "
+                    "(do not loop on reads)."
+                )
+            if has_aligned and not (has_step8_png and has_step8_json):
+                return (
+                    "[plan-guard] PartD direct path: aligned JSON is ready. "
+                    "Call `emit_step08_from_case12_aligned` now to generate "
+                    "`debug/step08_final_tp.png` + `debug/step08_result.json` "
+                    "(and update `debug/step03_mapping.json`), then finish."
+                )
+            if has_step8_png and has_step8_json:
+                return (
+                    "[plan-guard] PartD final artifacts are ready "
+                    "(`step08_final_tp.png` + `step08_result.json`). "
+                    "Do not loop on `read_text_file`; call `finish` now."
+                )
+        if current_id == "partd_case12_align_and_finish" and tool == "view_image":
+            has_step8_png = self._artifact_exists("debug/step08_final_tp.png")
+            has_step8_json = self._artifact_exists("debug/step08_result.json")
+            if has_step8_png and has_step8_json:
+                return (
+                    "[plan-guard] PartD final artifacts are already ready "
+                    "(`step08_final_tp.png` + `step08_result.json`). "
+                    "Skip extra `view_image` verification and call `finish` now."
+                )
+        if current_id == "partd_case12_align_and_finish" and tool == "save_text_file":
+            args = call.arguments if isinstance(call.arguments, dict) else {}
+            p = str(args.get("path", "")).replace("\\", "/").lower()
+            blocked = (
+                "debug/case12_step02_locator_graph.json",
+                "debug/case12_step02_locator_graph.png",
+                "debug/case12_board_points_aligned.json",
+                "debug/case12_board_approx_overlay_opencv.png",
+            )
+            if any(p.endswith(x) for x in blocked):
+                return (
+                    "[plan-guard] PartD case12 artifacts must be generated by "
+                    "`case12_step02_graph` functions, not manual `save_text_file`.\n"
+                    "Use run_python:\n"
+                    "1) `from case12_step02_graph import run_build_step02_locator_graph`\n"
+                    "2) `run_build_step02_locator_graph(Path(os.environ['WORKSPACE']))`\n"
+                    "3) `from case12_step02_graph import run_align_locator_graph_to_board_ic_bbox`\n"
+                    "4) `run_align_locator_graph_to_board_ic_bbox(Path(os.environ['WORKSPACE']))`"
+                )
+        if current_id == "partd_case12_align_and_finish" and tool == "finish":
+            ws = self.cfg.workspace_dir.resolve()
+            map_p = self._path_first_existing(
+                [ws / "debug" / "step03_mapping.json", ws / "workspace" / "debug" / "step03_mapping.json"]
+            )
+            mm: str | None = None
+            if map_p is not None:
+                try:
+                    obj = json.loads(map_p.read_text(encoding="utf-8"))
+                    mv = obj.get("mapping_method")
+                    if isinstance(mv, str):
+                        mm = mv.strip() or None
+                except Exception:  # noqa: BLE001
+                    mm = None
+            if mm not in {"case12_step02_opencv_ic_align", "case12_step02_vlm_ic_align"}:
+                return (
+                    "[plan-guard] Before `finish`, set `debug/step03_mapping.json` "
+                    "`mapping_method` to `case12_step02_opencv_ic_align` (or "
+                    "`case12_step02_vlm_ic_align` for vlm_test). This prevents fallback "
+                    "to legacy dual-ROI Step4/5 contract checks."
+                )
+            aligned_p = self._path_first_existing(
+                [
+                    ws / "debug" / "case12_board_points_aligned.json",
+                    ws / "workspace" / "debug" / "case12_board_points_aligned.json",
+                ]
+            )
+            if aligned_p is not None:
+                try:
+                    ao = json.loads(aligned_p.read_text(encoding="utf-8"))
+                    if not isinstance(ao.get("source"), str):
+                        return (
+                            "[plan-guard] `case12_board_points_aligned.json` is missing `source`. "
+                            "Regenerate it via case12 align flow before finish."
+                        )
+                except Exception:  # noqa: BLE001
+                    return (
+                        "[plan-guard] `case12_board_points_aligned.json` is invalid JSON. "
+                        "Regenerate alignment output before finish."
+                    )
+            graph_p = self._path_first_existing(
+                [
+                    ws / "debug" / "case12_step02_locator_graph.json",
+                    ws / "workspace" / "debug" / "case12_step02_locator_graph.json",
+                ]
+            )
+            if graph_p is not None:
+                try:
+                    go = json.loads(graph_p.read_text(encoding="utf-8"))
+                    if go.get("schema_version") != 3:
+                        return (
+                            "[plan-guard] `case12_step02_locator_graph.json` must be schema_version=3 "
+                            "from `run_build_step02_locator_graph`."
+                        )
+                    must_keys = ("tp_center", "largest_ic", "references", "graph_edges", "pairwise_roi")
+                    miss = [k for k in must_keys if k not in go]
+                    if miss:
+                        return (
+                            "[plan-guard] `case12_step02_locator_graph.json` is missing keys: "
+                            + ", ".join(miss)
+                            + ". Regenerate via `run_build_step02_locator_graph`."
+                        )
+                except Exception:  # noqa: BLE001
+                    return (
+                        "[plan-guard] Invalid `case12_step02_locator_graph.json`. "
+                        "Regenerate with `run_build_step02_locator_graph`."
+                    )
+        if current_id == "partd_case12_align_and_finish" and tool == "run_python" and isinstance(call.arguments, dict):
+            has_s02_loc = self._artifact_exists("debug/step02_locator_front_anchor.png")
+            has_s02_board = self._artifact_exists("debug/step02_board_front_anchor.png")
+            has_graph = self._artifact_exists("debug/case12_step02_locator_graph.json")
+            if has_s02_loc and has_s02_board and not has_graph:
+                return (
+                    "[plan-guard] PartD should call `case12_build_and_align_from_step02_anchors` first. "
+                    "It takes the two step02 anchor images and runs official case12 graph build+align "
+                    "without `workspace/workspace` path issues."
+                )
+            has_aligned = self._artifact_exists("debug/case12_board_points_aligned.json")
+            has_step8 = self._artifact_exists("debug/step08_final_tp.png") and self._artifact_exists("debug/step08_result.json")
+            if has_aligned and not has_step8:
+                return (
+                    "[plan-guard] Aligned JSON is already ready in PartD. "
+                    "Do not use ad-hoc run_python now; call `emit_step08_from_case12_aligned`."
+                )
+            code = str(call.arguments.get("code", ""))
+            low = code.lower()
+            if "cv2.matchtemplate(" in low:
+                return (
+                    "[plan-guard] PartD should reuse the built-in matching tool instead of ad-hoc "
+                    "`cv2.matchTemplate` scripts. Use `match_green_tp_roi_to_board` with project "
+                    "defaults (`search_max_dim=1200`, `min_match_score=0.2`, `scale_steps=26`) "
+                    "or proceed with case12 graph align tools."
+                )
+            case12_files = (
+                "case12_step02_locator_graph.json",
+                "case12_step02_locator_graph.png",
+                "case12_board_points_aligned.json",
+                "case12_board_approx_overlay_opencv.png",
+            )
+            if any(x in low for x in case12_files):
+                if (
+                    "run_build_step02_locator_graph" not in code
+                    and "run_align_locator_graph_to_board_ic_bbox" not in code
+                    and "run_align_locator_graph_to_board_ic_bbox_vlm" not in code
+                ):
+                    return (
+                        "[plan-guard] PartD case12 files are being written by ad-hoc Python. "
+                        "Use official functions from `case12_step02_graph.py`:\n"
+                        "- `run_build_step02_locator_graph(...)`\n"
+                        "- `run_align_locator_graph_to_board_ic_bbox(...)` (or `_vlm` variant)."
+                    )
+        if current_id == "partd_case12_align_and_finish" and tool == "case12_build_and_align_from_step02_anchors":
+            has_aligned = self._artifact_exists("debug/case12_board_points_aligned.json")
+            has_step8 = self._artifact_exists("debug/step08_final_tp.png") and self._artifact_exists("debug/step08_result.json")
+            if has_aligned and not has_step8:
+                return (
+                    "[plan-guard] PartD alignment already completed. "
+                    "Call `emit_step08_from_case12_aligned` now instead of rebuilding graph/alignment."
+                )
+        if tool == "run_step3_mapping":
+            if current_id in {"parta_board_largest_ic", "partd_case12_align_and_finish"}:
+                return (
+                    "[plan-guard] This STANDARD_WORKFLOW path should not use `run_step3_mapping`. "
+                    "After step02 anchors are ready, call "
+                    "`case12_build_and_align_from_step02_anchors` directly."
+                )
+        if current_id == "partd_case12_align_and_finish" and tool in {"annotate_image", "save_text_file"}:
+            has_aligned = self._artifact_exists("debug/case12_board_points_aligned.json")
+            has_step8 = self._artifact_exists("debug/step08_final_tp.png") and self._artifact_exists("debug/step08_result.json")
+            if has_aligned and not has_step8:
+                return (
+                    "[plan-guard] PartD finalization should use dedicated tool "
+                    "`emit_step08_from_case12_aligned` instead of manual annotate/save."
+                )
+        if tool == "finish" and current_id != "partd_case12_align_and_finish":
+            return (
+                "[plan-guard] `finish` is only allowed in PartD after prior phases complete."
+            )
+        return None
+
+    @staticmethod
+    def _tool_call_signature(call: ToolInvocation) -> str:
+        if call.name == "read_text_file" and isinstance(call.arguments, dict):
+            p = str(call.arguments.get("path", "")).replace("\\", "/").lower()
+            return f"read_text_file|{p}"
+        if call.name == "list_files" and isinstance(call.arguments, dict):
+            p = str(call.arguments.get("path", "")).replace("\\", "/").lower()
+            return f"list_files|{p}"
+        try:
+            args = json.dumps(call.arguments or {}, ensure_ascii=False, sort_keys=True)
+        except Exception:  # noqa: BLE001
+            args = str(call.arguments)
+        return f"{call.name}|{args}"
+
+    def _append_repetition_guard(
+        self,
+        messages: list[dict[str, Any]],
+        call: ToolInvocation,
+        recent_signatures: list[str],
+    ) -> bool:
+        sig = self._tool_call_signature(call)
+        recent_signatures.append(sig)
+        if len(recent_signatures) > 6:
+            del recent_signatures[:-6]
+        if len(recent_signatures) < 3:
+            return False
+        if not (recent_signatures[-1] == recent_signatures[-2] == recent_signatures[-3]):
+            return False
+        if call.name not in {"list_files", "read_text_file"}:
+            return False
+        messages.append(self.client.user_message(
+            "[loop-guard]\n"
+            f"You have called the same `{call.name}` command 3 times consecutively. "
+            "Do not repeat it again. Proceed to the next concrete workflow step."
+        ))
+        return True
+
+    @staticmethod
+    def _extract_artifact_paths(text: str) -> list[str]:
+        pat = re.compile(
+            r"([A-Za-z]:\\[^\\\n\r\t\"']+\.(?:png|jpg|jpeg|json|md|pdf|txt)|"
+            r"(?:debug|artifacts|progress)[/\\][^\\\n\r\t\"']+\.(?:png|jpg|jpeg|json|md|txt))",
+            re.IGNORECASE,
+        )
+        found: list[str] = []
+        for m in pat.finditer(text):
+            p = m.group(1)
+            if p not in found:
+                found.append(p)
+            if len(found) >= 6:
+                break
+        return found
+
+    def _compress_tool_result_for_context(self, tool_name: str, raw_text: str) -> str:
+        max_chars = max(180, int(getattr(self.cfg, "context_tool_text_max_chars", 700)))
+        text = (raw_text or "").strip()
+        if not text:
+            return f"[tool-summary] {tool_name}: (empty output)"
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        keep_lines: list[str] = []
+        for ln in lines:
+            low = ln.lower()
+            if low.startswith("[python-error]") or "[contract-error]" in low:
+                keep_lines.append(ln)
+                continue
+            if any(k in low for k in ("wrote ", "saved ", "listing ", "final_bbox", "pixel", "missing", "error", "warning")):
+                keep_lines.append(ln)
+            if len(keep_lines) >= 6:
+                break
+        if not keep_lines:
+            keep_lines = lines[:4]
+        paths = self._extract_artifact_paths(text)
+        out = [f"[tool-summary] {tool_name}"]
+        out.extend(f"- {ln}" for ln in keep_lines)
+        if paths:
+            out.append("- artifacts:")
+            out.extend(f"  - {p}" for p in paths)
+        joined = "\n".join(out)
+        return truncate(joined, max_chars)
+
+    @staticmethod
+    def _build_finish_retry_hint(errors: list[str]) -> str:
+        missing = [e.strip() for e in errors[:4]]
+        body = "\n".join(f"- {e}" for e in missing)
+        return (
+            "[finish-retry-diff]\n"
+            "Previous finish rejected. Only fix these gaps, then retry finish:\n"
+            f"{body}\n"
+            "Do not restate full reasoning; continue from current artifacts."
+        )
+
+    def _maybe_emit_python_error_hint(
+        self,
+        messages: list[dict[str, Any]],
+        call: ToolInvocation,
+        result_obj: ToolResult,
+    ) -> None:
+        if call.name != "run_python" or bool(result_obj.ok):
+            return
+        txt = str(result_obj.text or "")
+        if "list indices must be integers or slices, not str" in txt:
+            messages.append(self.client.user_message(
+                "[python-error-hint]\n"
+                "The previous python failed with list/dict indexing mismatch.\n"
+                "Fix pattern:\n"
+                "- `hits = search_data.get('hits', [])` (hits is a list)\n"
+                "- check `if not hits: raise RuntimeError(...)`\n"
+                "- use `hit = hits[0]` then access dict keys from `hit`\n"
+                "- do NOT use string key indexing directly on `hits` list."
+            ))
+        if "cannot unpack non-iterable nonetype object" in txt.lower():
+            messages.append(self.client.user_message(
+                "[python-error-hint]\n"
+                "Previous python failed with None unpack.\n"
+                "Defensive checks before unpacking are required:\n"
+                "- verify function return is not None before `a, b = value`\n"
+                "- verify contour/candidate list is non-empty before selecting best\n"
+                "- for cv2 reads, check `img is not None` before using shape/unpack\n"
+                "- for optional matches, use explicit `if value is None: ...` fallback path."
+            ))
+
+    def _build_phase_summary(self, phase: str, steps: list[AgentStep]) -> str:
+        max_lines = max(5, int(getattr(self.cfg, "context_phase_summary_max_lines", 8)))
+        tool_names: list[str] = []
+        artifacts: list[str] = []
+        for st in steps:
+            for c in st.tool_calls:
+                nm = c.get("name")
+                if isinstance(nm, str) and nm and nm not in tool_names:
+                    tool_names.append(nm)
+            for r in st.tool_results:
+                txt = str(r.get("text", ""))
+                for p in self._extract_artifact_paths(txt):
+                    if p not in artifacts:
+                        artifacts.append(p)
+                    if len(artifacts) >= 4:
+                        break
+        lines: list[str] = [
+            f"[phase-summary] {phase}",
+            f"- steps: {len(steps)}",
+            f"- tools: {', '.join(tool_names[:6]) if tool_names else '(none)'}",
+        ]
+        if artifacts:
+            lines.append(f"- key artifacts: {', '.join(artifacts[:4])}")
+        last = steps[-1] if steps else None
+        if last and last.tool_results:
+            lines.append(f"- latest result: {truncate(str(last.tool_results[-1].get('text', '')), 180)}")
+        return "\n".join(lines[:max_lines])
+
+    def _maybe_emit_phase_summary(
+        self,
+        messages: list[dict[str, Any]],
+        phase_steps: dict[str, list[AgentStep]],
+        current_phase: str | None,
+        latest_step: AgentStep,
+    ) -> str | None:
+        latest_phase = self._infer_step_part(latest_step, prev_part=current_phase)
+        phase_steps.setdefault(latest_phase, []).append(latest_step)
+        if current_phase is None:
+            return latest_phase
+        if latest_phase == current_phase:
+            return current_phase
+        if current_phase != "unknown":
+            summary = self._build_phase_summary(current_phase, phase_steps.get(current_phase, []))
+            messages.append(self.client.user_message(summary))
+            self._compact_message_window(messages)
+        return latest_phase
+
     def _supports_inline_images(self) -> bool:
         """Best-effort capability check for `image_url` message blocks."""
         model = self.cfg.model.lower()
@@ -549,7 +2009,11 @@ class Agent:
             "## Step3 execution constraints (MANDATORY when task starts from Step3)\n"
             "- Prefer **`match_green_tp_roi_to_board`** when the Task skips red anchors; "
             "omit `board_path` so `INPUT_PATHS['front_board_photo']` is used.\n"
-            "- Otherwise prefer tool `run_step3_mapping` on Step2 red-box images.\n"
+            "- Reuse tool defaults for template matching unless evidence suggests otherwise: "
+            "`search_max_dim=1200`, `min_match_score=0.2`, `scale_steps=26`, `margin_px=80`.\n"
+            "- For STANDARD_WORKFLOW case011 (part0->partB->partA->partD), "
+            "do **not** use `run_step3_mapping`; use `case12_build_and_align_from_step02_anchors` in PartD.\n"
+            "- `run_step3_mapping` is only for non-case12 legacy Step3 flows explicitly requested by Task.\n"
             "- Use HSV red ranges [0,100,100]-[10,255,255] and [170,100,100]-[180,255,255].\n"
             "- Use HSV green range [40,100,100]-[80,255,255].\n"
             "- Detect largest contour and use boundingRect/moments.\n"
@@ -566,9 +2030,10 @@ class Agent:
             "（两框 OpenCV）："
             "`run_build_step02_locator_graph` → `run_align_locator_graph_to_board_ic_bbox` "
             "(OpenCV **实物 IC 红框**) "
-            "→ read **`board_roi_target_px_approx`** from **`case12_board_points_aligned.json`** → "
-            "**`annotate_image`** on **`debug/step02_board_front_anchor.png`** → **`step08_final_tp.png`** "
-            "+ **`step08_result.json`** + **`step03_mapping.json`** with **`mapping_method`** only, then **`finish`**.\n"
+            "→ call **`emit_step08_from_case12_aligned`** "
+            "(from **`case12_board_points_aligned.json`** to **`step08_final_tp.png`** + "
+            "**`step08_result.json`** + `step03_mapping.json.mapping_method`) "
+            "→ **`finish`**.\n"
         )
         if wf_mode_run == "vlm_test":
             part_d_primary = (
@@ -613,7 +2078,25 @@ class Agent:
         ]
         user_parts.extend(image_parts)
         messages.append(self.client.user_message(user_parts))
+        messages.append(self.client.user_message(
+            self._build_global_summary_message(question, inputs)
+        ))
         return messages
+
+    @staticmethod
+    def _build_global_summary_message(question: str, inputs: dict[str, Any]) -> str:
+        lines: list[str] = [
+            "[global-summary]",
+            "- Goal: locate target TP on board and return finish.answer.pixel [x,y].",
+            "- Keep tool-first workflow; each required step still needs real tool calls.",
+            "- Prefer compact carry-over: use artifacts in debug/*.png|json as source of truth.",
+            "- Retry rule: when finish is rejected, only patch missing artifacts then finish again.",
+            f"- Task digest: {truncate(' '.join(question.split()), 260)}",
+        ]
+        inp_keys = ", ".join(sorted(str(k) for k in inputs.keys())[:12])
+        if inp_keys:
+            lines.append(f"- Inputs: {inp_keys}")
+        return "\n".join(lines)
 
     def _validate_finish_answer(self, answer: Any) -> list[str]:
         """Require a board pixel [x,y] in finish payload; align with step08_result when present."""
@@ -675,6 +2158,7 @@ class Agent:
                         )
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Could not cross-check finish pixel with step08_result.json: {e}")
+
         return errors
 
     def _part_b_assembly_stepb3_qc_errors(self, ws: Path) -> list[str]:
@@ -839,7 +2323,6 @@ class Agent:
             "debug/case10_assembly_drawing.png",
             "debug/case10_target_tp_work_roi.png",
             "debug/case10_assembly_drawing_tp_marked.png",
-            "debug/case10_board_landscape.png",
             "debug/case10_assembly_largest_ic_box.png",
             "debug/case10_assembly_largest_ic.json",
             "debug/case10_largest_ic_box.png",
@@ -936,7 +2419,6 @@ class Agent:
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Failed to validate step08 vs board size: {e}")
 
-        errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
         return errors
 
     def _validate_skill_contract_case12_vlm_ic_align(self, ws: Path) -> list[str]:
@@ -948,7 +2430,6 @@ class Agent:
             "debug/case10_assembly_drawing.png",
             "debug/case10_target_tp_work_roi.png",
             "debug/case10_assembly_drawing_tp_marked.png",
-            "debug/case10_board_landscape.png",
             "debug/case10_assembly_largest_ic_box.png",
             "debug/case10_assembly_largest_ic.json",
             "debug/step02_locator_front_anchor.png",
@@ -1068,7 +2549,6 @@ class Agent:
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Failed to validate step08 vs board size: {e}")
 
-        errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
         return errors
 
     def _validate_skill_contract(self) -> list[str]:
@@ -1162,12 +2642,20 @@ class Agent:
                 ).get("mapping_method")
             except Exception:
                 mapping_method_tag = None
+        if not (isinstance(mapping_method_tag, str) and mapping_method_tag.strip()):
+            inferred = self._infer_case12_mapping_method_from_workspace(ws)
+            if inferred:
+                mapping_method_tag = inferred
         mapping_method_vlm = mapping_method_tag in (
             "vlm_neighborhood_layout_match",
             "case10_dual_roi_layout",
         )
         mapping_method_case10_layout = mapping_method_tag == "case10_dual_roi_layout"
         mapping_method_case12_layout = mapping_method_tag == "case12_step02_anchor_match"
+        mapping_method_case12_direct = mapping_method_tag in (
+            "case12_step02_opencv_ic_align",
+            "case12_step02_vlm_ic_align",
+        )
 
         def _first_existing(paths: list[Path]) -> Path | None:
             for q in paths:
@@ -1247,7 +2735,6 @@ class Agent:
                 "debug/case10_assembly_drawing.png",
                 "debug/case10_target_tp_work_roi.png",
                 "debug/case10_assembly_drawing_tp_marked.png",
-                "debug/case10_board_landscape.png",
                 "debug/case10_assembly_largest_ic_box.png",
                 "debug/case10_assembly_largest_ic.json",
                 "debug/case10_largest_ic_box.png",
@@ -1327,9 +2814,6 @@ class Agent:
             if not (p1.exists() or p2.exists()):
                 errors.append(f"Missing required debug artifact: {rel}")
 
-        if mapping_method_case10_layout:
-            errors.extend(self._part_b_assembly_stepb3_qc_errors(ws))
-
         # Step8 final image must be on full board, not ROI-sized crop.
         step08 = next((p for p in [ws / "debug" / "step08_final_tp.png",
                                    ws / "workspace" / "debug" / "step08_final_tp.png"]
@@ -1372,82 +2856,83 @@ class Agent:
         step05_candidates_for_time = next((p for p in [ws / "debug" / "step05_candidates.json",
                                                        ws / "workspace" / "debug" / "step05_candidates.json"]
                                            if p.exists()), None)
-        try:
-            step04_lm = _first_existing(
-                [
-                    ws / "debug" / "step04_locator_landmarks.png",
-                    ws / "workspace" / "debug" / "step04_locator_landmarks.png",
-                ]
-            )
-            step04_loc_roi_crop = _first_existing(
-                [
-                    ws / "debug" / "step04_locator_roi_crop.png",
-                    ws / "workspace" / "debug" / "step04_locator_roi_crop.png",
-                ]
-            )
-            step03_loc_roi = _first_existing(
-                [
-                    ws / "debug" / "step03_locator_roi.png",
-                    ws / "workspace" / "debug" / "step03_locator_roi.png",
-                ]
-            )
-            if (
-                mapping_method_vlm
-                and not mapping_method_case10_layout
-                and step04_lm is not None
-                and step03_loc_roi is not None
-            ):
-                if step04_lm.stat().st_mtime + 1e-3 < step03_loc_roi.stat().st_mtime:
-                    errors.append(
-                        "step04_locator_landmarks.png must be newer than "
-                        "step03_locator_roi.png (run Step4 after Step3A)."
-                    )
-            if (
-                mapping_method_vlm
-                and not mapping_method_case10_layout
-                and step03_mapping is not None
-                and step04_lm is not None
-            ):
-                if step03_mapping.stat().st_mtime + 1e-3 < step04_lm.stat().st_mtime:
-                    errors.append(
-                        "step03_mapping.json is older than step04_locator_landmarks.png. "
-                        "Write prior/mapping only after Step4 locator landmarks."
-                    )
-            if (
-                mapping_method_case10_layout
-                and step03_mapping is not None
-                and step04_loc_roi_crop is not None
-            ):
-                if step04_loc_roi_crop.stat().st_mtime + 1e-3 < step03_mapping.stat().st_mtime:
-                    errors.append(
-                        "step04_locator_roi_crop.png must be newer than step03_mapping.json "
-                        "(take locator ROI after Step3 mapping / prior is fixed)."
-                    )
-            if step03_mapping is not None and step04_roi is not None:
-                t3 = step03_mapping.stat().st_mtime
-                t4 = step04_roi.stat().st_mtime
-                if t4 + 1e-3 < t3:
-                    errors.append(
-                        "step04_roi_crop.png is older than step03_mapping.json. "
-                        "Regenerate the board ROI crop after Step3 mapping in this run."
-                    )
-            if step04_roi is not None and step05_candidates_for_time is not None:
-                t4 = step04_roi.stat().st_mtime
-                t5 = step05_candidates_for_time.stat().st_mtime
-                if t5 + 1e-3 < t4:
-                    errors.append(
-                        "step05_candidates.json is older than step04_roi_crop.png. "
-                        "Step5/6/7 must run after Step4 ROI generation."
-                    )
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"Failed to validate Step3->Step4->Step5 artifact timeline: {e}")
+        if not mapping_method_case12_direct:
+            try:
+                step04_lm = _first_existing(
+                    [
+                        ws / "debug" / "step04_locator_landmarks.png",
+                        ws / "workspace" / "debug" / "step04_locator_landmarks.png",
+                    ]
+                )
+                step04_loc_roi_crop = _first_existing(
+                    [
+                        ws / "debug" / "step04_locator_roi_crop.png",
+                        ws / "workspace" / "debug" / "step04_locator_roi_crop.png",
+                    ]
+                )
+                step03_loc_roi = _first_existing(
+                    [
+                        ws / "debug" / "step03_locator_roi.png",
+                        ws / "workspace" / "debug" / "step03_locator_roi.png",
+                    ]
+                )
+                if (
+                    mapping_method_vlm
+                    and not mapping_method_case10_layout
+                    and step04_lm is not None
+                    and step03_loc_roi is not None
+                ):
+                    if step04_lm.stat().st_mtime + 1e-3 < step03_loc_roi.stat().st_mtime:
+                        errors.append(
+                            "step04_locator_landmarks.png must be newer than "
+                            "step03_locator_roi.png (run Step4 after Step3A)."
+                        )
+                if (
+                    mapping_method_vlm
+                    and not mapping_method_case10_layout
+                    and step03_mapping is not None
+                    and step04_lm is not None
+                ):
+                    if step03_mapping.stat().st_mtime + 1e-3 < step04_lm.stat().st_mtime:
+                        errors.append(
+                            "step03_mapping.json is older than step04_locator_landmarks.png. "
+                            "Write prior/mapping only after Step4 locator landmarks."
+                        )
+                if (
+                    mapping_method_case10_layout
+                    and step03_mapping is not None
+                    and step04_loc_roi_crop is not None
+                ):
+                    if step04_loc_roi_crop.stat().st_mtime + 1e-3 < step03_mapping.stat().st_mtime:
+                        errors.append(
+                            "step04_locator_roi_crop.png must be newer than step03_mapping.json "
+                            "(take locator ROI after Step3 mapping / prior is fixed)."
+                        )
+                if step03_mapping is not None and step04_roi is not None:
+                    t3 = step03_mapping.stat().st_mtime
+                    t4 = step04_roi.stat().st_mtime
+                    if t4 + 1e-3 < t3:
+                        errors.append(
+                            "step04_roi_crop.png is older than step03_mapping.json. "
+                            "Regenerate the board ROI crop after Step3 mapping in this run."
+                        )
+                if step04_roi is not None and step05_candidates_for_time is not None:
+                    t4 = step04_roi.stat().st_mtime
+                    t5 = step05_candidates_for_time.stat().st_mtime
+                    if t5 + 1e-3 < t4:
+                        errors.append(
+                            "step05_candidates.json is older than step04_roi_crop.png. "
+                            "Step5/6/7 must run after Step4 ROI generation."
+                        )
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Failed to validate Step3->Step4->Step5 artifact timeline: {e}")
 
         # Scheme C: Step5 candidates must provide stable global coordinates
         # + adaptive visualization radius, and Step8 should consume them.
         step05_candidates = next((p for p in [ws / "debug" / "step05_candidates.json",
                                               ws / "workspace" / "debug" / "step05_candidates.json"]
                                   if p.exists()), None)
-        if step05_candidates is not None:
+        if step05_candidates is not None and not mapping_method_case12_direct:
             try:
                 cand_obj = json.loads(step05_candidates.read_text(encoding="utf-8"))
                 if isinstance(cand_obj, dict):
@@ -1629,6 +3114,68 @@ class Agent:
             for rec in records:
                 f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
+    def _append_step_record(self, run_dir: Path, record: dict[str, Any]) -> None:
+        with open(run_dir / "step_records.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def _append_agent_return_log(
+        self,
+        run_dir: Path,
+        step_idx: int,
+        assistant_content: Any,
+        final_answer: Any | None = None,
+    ) -> None:
+        """Append a compact per-step Agent return log for quick inspection."""
+        record = {
+            "timestamp": time.time(),
+            "step": step_idx,
+            "assistant_return": assistant_content,
+            "final_answer": final_answer,
+        }
+        with open(run_dir / "agent_return.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def _append_plain_log(self, run_dir: Path, message: str) -> None:
+        ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(run_dir / "agent.log", "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {message}\n")
+
+    @staticmethod
+    def _compact_text(value: Any, limit: int = 320) -> str:
+        if value is None:
+            return "(none)"
+        text = str(value)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
+
+    def _format_step_plain_log(
+        self,
+        step_idx: int,
+        step_timing: dict[str, Any],
+        assistant_content: Any,
+        final_answer: Any | None,
+    ) -> str:
+        step_total = step_timing.get("step_total_s", "na")
+        llm_s = step_timing.get("llm_s", "na")
+        tools_s = step_timing.get("tools_s", "na")
+        assistant_preview = self._compact_text(assistant_content)
+        final_preview = self._compact_text(
+            json.dumps(final_answer, ensure_ascii=False) if final_answer is not None else None
+        )
+        return (
+            f"step={step_idx} total_s={step_total} llm_s={llm_s} tools_s={tools_s} "
+            f"assistant_return={assistant_preview} final_answer={final_preview}"
+        )
+
+    @staticmethod
+    def _snapshot_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        try:
+            return json.loads(json.dumps(messages, ensure_ascii=False, default=str))
+        except Exception:  # noqa: BLE001
+            return list(messages)
+
     def _persist_run(self, run_dir: Path, result: AgentRun,
                      messages: list[dict[str, Any]]) -> None:
         summary = {
@@ -1636,12 +3183,16 @@ class Agent:
             "stopped_reason": result.stopped_reason,
             "final_answer": result.final_answer,
             "last_error": result.last_error,
+            "part_timing": result.part_timing,
             "steps": [
                 {
                     "index": s.index,
                     "assistant_content": s.assistant_content,
                     "tool_calls": s.tool_calls,
                     "tool_results": s.tool_results,
+                    "timing": s.timing,
+                    "tool_timing": s.tool_timing,
+                    "usage": s.usage,
                 }
                 for s in result.steps
             ],
@@ -1650,7 +3201,125 @@ class Agent:
             json.dumps(summary, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
+        # Always write a terminal return record so failed/early-stop runs still
+        # expose the latest Agent return state in a dedicated log file.
+        self._append_agent_return_log(
+            run_dir=run_dir,
+            step_idx=-1,
+            assistant_content=None,
+            final_answer={
+                "final_answer": result.final_answer,
+                "stopped_reason": result.stopped_reason,
+                "last_error": result.last_error,
+            },
+        )
+        self._append_plain_log(
+            run_dir=run_dir,
+            message=(
+                "run_end "
+                + self._compact_text(
+                    json.dumps(
+                        {
+                            "stopped_reason": result.stopped_reason,
+                            "last_error": result.last_error,
+                            "final_answer": result.final_answer,
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                    limit=1000,
+                )
+            ),
+        )
         self._log_jsonl(run_dir, "messages.final.jsonl", messages)
+
+    def _infer_step_part(self, step: AgentStep, prev_part: str | None = None) -> str:
+        blob_parts: list[str] = [step.assistant_content or ""]
+        for c in step.tool_calls:
+            nm = c.get("name")
+            if nm:
+                blob_parts.append(str(nm))
+            try:
+                blob_parts.append(json.dumps(c.get("arguments", {}), ensure_ascii=False))
+            except Exception:  # noqa: BLE001
+                blob_parts.append(str(c.get("arguments", "")))
+        for r in step.tool_results:
+            blob_parts.append(str(r.get("text", "")))
+        blob = "\n".join(blob_parts).lower()
+
+        patterns: list[tuple[str, list[str]]] = [
+            ("partd", [
+                "case12_", "step08_", "step03_mapping", "mapping_method",
+                "run_align_locator_graph_to_board", "case12_step02",
+            ]),
+            ("partc", [
+                "step02_locator_front_anchor", "step02_board_front_anchor",
+                "board_tp_marked",
+            ]),
+            ("parta", [
+                "case10_largest_ic_box", "case10_largest_ic.json",
+                "case10_vlm_hints.json",
+            ]),
+            ("partb", [
+                "case10_assembly_largest_ic_box", "case10_assembly_largest_ic.json",
+                "case10_assembly_vlm_hints", "stepb3", "assembly_opencv_debug",
+            ]),
+            ("part0", [
+                "case10_signal_to_tp", "case10_target_tp_pdf_search",
+                "case10_target_tp_work_roi", "case10_assembly_drawing_tp_marked",
+                "search_pdf_text",
+            ]),
+        ]
+        for label, kws in patterns:
+            if any(k in blob for k in kws):
+                return label
+
+        # Fallback for malformed <tool_call> finish loops.
+        if re.search(r"<tool_call>\s*\{\s*\"name\"\s*:\s*\"finish\"", blob):
+            return "partd"
+        if prev_part:
+            return prev_part
+        return "unknown"
+
+    def _compute_part_timing(self, result: AgentRun) -> dict[str, float]:
+        out: dict[str, float] = {
+            "part0_s": 0.0,
+            "partb_s": 0.0,
+            "parta_s": 0.0,
+            "partc_s": 0.0,
+            "partd_s": 0.0,
+            "unknown_s": 0.0,
+            "total_s": 0.0,
+        }
+        prev_part: str | None = None
+        for s in result.steps:
+            t = float((s.timing or {}).get("step_total_s", 0.0) or 0.0)
+            out["total_s"] += t
+            part = self._infer_step_part(s, prev_part=prev_part)
+            prev_part = part if part != "unknown" else prev_part
+            key = {
+                "part0": "part0_s",
+                "partb": "partb_s",
+                "parta": "parta_s",
+                "partc": "partc_s",
+                "partd": "partd_s",
+            }.get(part, "unknown_s")
+            out[key] += t
+        return {k: round(v, 4) for k, v in out.items()}
+
+    def _render_part_timing_lines(self, part_timing: dict[str, float]) -> str:
+        if not part_timing:
+            return ""
+        return (
+            "[bold]part timing[/bold]\n"
+            f"- part0 = {part_timing.get('part0_s', 0.0):.2f}s\n"
+            f"- partB = {part_timing.get('partb_s', 0.0):.2f}s\n"
+            f"- partA = {part_timing.get('parta_s', 0.0):.2f}s\n"
+            f"- partC = {part_timing.get('partc_s', 0.0):.2f}s\n"
+            f"- partD = {part_timing.get('partd_s', 0.0):.2f}s\n"
+            f"- unknown = {part_timing.get('unknown_s', 0.0):.2f}s\n"
+            f"- total = {part_timing.get('total_s', 0.0):.2f}s"
+        )
 
     # --------------------------- rendering --------------------------- #
 
@@ -1660,6 +3329,65 @@ class Agent:
             truncate(body, 1500),
             title=f"[cyan]assistant · step {step} · {dt:.2f}s · {len(reply.tool_calls)} tool-call(s)[/cyan]",
             border_style="cyan",
+        ))
+
+    def _render_step_timing(
+        self, step: int, timing: dict[str, float], tool_timing: list[dict[str, Any]]
+    ) -> None:
+        parts = [
+            f"llm={timing.get('llm_s', 0.0):.2f}s",
+            f"tools={timing.get('tools_s', 0.0):.2f}s",
+            f"attach={timing.get('images_attach_s', 0.0):.2f}s",
+            f"total={timing.get('step_total_s', 0.0):.2f}s",
+        ]
+        llm_sub = (
+            "prep={:.2f}s api={:.2f}s retry_sleep={:.2f}s parse={:.2f}s".format(
+                float(timing.get("llm_prep_s", 0.0)),
+                float(timing.get("llm_api_call_s", 0.0)),
+                float(timing.get("llm_retry_sleep_s", 0.0)),
+                float(timing.get("llm_parse_s", 0.0)),
+            )
+            if any(
+                k in timing
+                for k in (
+                    "llm_prep_s",
+                    "llm_api_call_s",
+                    "llm_retry_sleep_s",
+                    "llm_parse_s",
+                )
+            )
+            else "(not available)"
+        )
+        llm_est = (
+            "est_prefill={:.2f}s est_decode={:.2f}s completion_tokens={:.0f} (coarse)".format(
+                float(timing.get("llm_est_prefill_s", 0.0)),
+                float(timing.get("llm_est_decode_s", 0.0)),
+                float(timing.get("llm_completion_tokens", 0.0)),
+            )
+            if any(
+                k in timing
+                for k in (
+                    "llm_est_prefill_s",
+                    "llm_est_decode_s",
+                    "llm_completion_tokens",
+                )
+            )
+            else "(not available)"
+        )
+        if tool_timing:
+            tool_str = ", ".join(
+                f"{t.get('name')}={float(t.get('duration_s', 0.0)):.2f}s"
+                for t in tool_timing
+            )
+        else:
+            tool_str = "(none)"
+        self.console.print(Panel(
+            f"[bold]breakdown[/bold]: {' | '.join(parts)}\n"
+            f"[bold]llm detail[/bold]: {llm_sub}\n"
+            f"[bold]llm estimate[/bold]: {llm_est}\n"
+            f"[bold]tools detail[/bold]: {tool_str}",
+            title=f"[magenta]step {step} timing[/magenta]",
+            border_style="magenta",
         ))
 
     def _render_tool(self, call: ToolInvocation, result: ToolResult) -> None:

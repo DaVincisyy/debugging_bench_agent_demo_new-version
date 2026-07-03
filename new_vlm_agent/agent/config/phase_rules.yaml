@@ -1,0 +1,8 @@
+# Per-phase idle / fuse thresholds for the workflow state machine.
+# max_idle_steps: consecutive assistant turns with no tool_calls before phase fuse.
+
+phases:
+  partb:
+    max_idle_steps: 3
+  partb_locator_largest_ic:
+    max_idle_steps: 3

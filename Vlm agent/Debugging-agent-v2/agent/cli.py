@@ -29,11 +29,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Override VLM_MODEL for this run.")
     p.add_argument("--base-url", help="Override VLM_BASE_URL for this run.")
     p.add_argument("--max-steps", type=int, default=None,
-                   help="Maximum planning/tool steps (default: 80).")
+                   help="Maximum planning/tool steps (default: 20).")
     p.add_argument("--workspace", default="workspace",
                    help="Workspace directory for artifacts and run logs.")
     p.add_argument("--no-native-tools", action="store_true",
                    help="Force JSON-tag fallback instead of native tool calling.")
+    p.add_argument("--flat-agent", action="store_true",
+                   help="Disable hierarchical planner/worker mode.")
 
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -93,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         overrides["VLM_BASE_URL"] = args.base_url
     if args.no_native_tools:
         overrides["VLM_USE_NATIVE_TOOLS"] = "false"
+    if args.flat_agent:
+        overrides["VLM_HIERARCHICAL_AGENT_MODE"] = "false"
 
     if args.cmd == "run":
         overrides["workflow_mode"] = getattr(args, "mode", "default")

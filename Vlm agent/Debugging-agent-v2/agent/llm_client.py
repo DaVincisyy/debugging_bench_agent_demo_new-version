@@ -50,6 +50,8 @@ class AssistantReply:
     content: str
     tool_calls: list[ToolInvocation]
     raw_message: dict[str, Any]
+    timing: dict[str, float] | None = None
+    usage: dict[str, Any] | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -68,6 +70,79 @@ def _dedupe_finish_calls(invocations: list[ToolInvocation]) -> list[ToolInvocati
     return others + [finishes[-1]]
 
 
+def _json_load_with_auto_closers(raw: str) -> dict[str, Any] | None:
+    """Best-effort parse for mildly truncated JSON object blocks.
+
+    Handles the common case where the model omits one or more trailing
+    `}` / `]` at the end of a `<tool_call>...</tool_call>` payload.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        obj = json.loads(text)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    stack: list[str] = []
+    in_str = False
+    esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            stack.append("}")
+            continue
+        if ch == "[":
+            stack.append("]")
+            continue
+        if ch in "}]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+            else:
+                return None
+    if in_str:
+        return None
+    if not stack:
+        return None
+    repaired = text + "".join(reversed(stack))
+    try:
+        obj = json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+def _repair_common_tool_call_json(raw: str) -> str:
+    """Repair common malformed fallback tool JSON emitted by some models.
+
+    Example repaired:
+      {"name":"read_text_file", {"path":"..."}}
+      -> {"name":"read_text_file","arguments":{"path":"..."}}
+    """
+    txt = (raw or "").strip()
+    if not txt:
+        return txt
+    # Missing `arguments` key after `name`/`tool`.
+    txt = re.sub(
+        r'(\{\s*"(?:name|tool)"\s*:\s*"[^"]+"\s*),\s*\{',
+        r'\1, "arguments": {',
+        txt,
+        flags=re.DOTALL,
+    )
+    return txt
+
+
 def _parse_tagged_tool_calls(content: str) -> list[ToolInvocation]:
     """Parse ``<tool_call>{...}</tool_call>`` blocks.
 
@@ -79,12 +154,22 @@ def _parse_tagged_tool_calls(content: str) -> list[ToolInvocation]:
         raw = (m.group(1) or "").strip()
         if not raw:
             continue
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
+        payload = _json_load_with_auto_closers(raw)
+        if not payload:
+            payload = _json_load_with_auto_closers(_repair_common_tool_call_json(raw))
+        if not payload:
             continue
         name = payload.get("name") or payload.get("tool")
-        args = payload.get("arguments") or payload.get("args") or {}
+        args = payload.get("arguments") or payload.get("args")
+        if args is None:
+            # Graceful fallback for payloads like:
+            # {"name":"read_text_file","path":"..."}
+            args = {
+                k: v for k, v in payload.items()
+                if k not in {"name", "tool", "arguments", "args"}
+            }
+        if args is None:
+            args = {}
         if not name:
             continue
         invocations.append(ToolInvocation(
@@ -156,6 +241,7 @@ class LLMClient:
         `tools_schema` follows the OpenAI tool schema
         (`[{"type": "function", "function": {"name":..., "parameters":...}}, ...]`).
         """
+        chat_t0 = time.time()
         kwargs: dict[str, Any] = {
             "model": self.cfg.model,
             "messages": messages,
@@ -187,13 +273,19 @@ class LLMClient:
         if self.cfg.reasoning_effort and not model_lower.startswith("intern-s1"):
             kwargs["reasoning_effort"] = self.cfg.reasoning_effort
 
+        prep_dt = time.time() - chat_t0
         resp = None
         attempts = max(1, int(self.cfg.connect_retries))
+        retry_sleep_s = 0.0
+        api_call_s = 0.0
         for attempt in range(attempts):
             try:
+                api_t0 = time.time()
                 resp = self._client.chat.completions.create(**kwargs)
+                api_call_s += time.time() - api_t0
                 break
             except BadRequestError as e:
+                api_call_s += time.time() - api_t0
                 body = str(e)
                 if "unknown variant `image_url`, expected `text`" in body:
                     raise RuntimeError(
@@ -218,11 +310,61 @@ class LLMClient:
                     ) from e
                 raise
             except (APIConnectionError, APITimeoutError):
+                api_call_s += time.time() - api_t0
                 if attempt + 1 >= attempts:
                     raise
-                time.sleep(min(4.0 * (2 ** attempt), 60.0))
+                sleep_s = min(4.0 * (2 ** attempt), 60.0)
+                retry_sleep_s += sleep_s
+                time.sleep(sleep_s)
         if resp is None:  # pragma: no cover
             raise RuntimeError("LLMClient.chat: failed without response")
+
+        parse_t0 = time.time()
+        usage = getattr(resp, "usage", None)
+        completion_tokens = 0
+        if usage is not None:
+            completion_tokens = int(
+                getattr(usage, "completion_tokens", 0)
+                or (
+                    usage.get("completion_tokens", 0)
+                    if isinstance(usage, dict)
+                    else 0
+                )
+                or 0
+            )
+        usage_payload: dict[str, Any] = {}
+        if usage is not None:
+            if hasattr(usage, "model_dump"):
+                try:
+                    usage_payload = usage.model_dump()
+                except Exception:  # noqa: BLE001
+                    usage_payload = {}
+            elif isinstance(usage, dict):
+                usage_payload = dict(usage)
+            else:
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    if hasattr(usage, key):
+                        try:
+                            usage_payload[key] = int(getattr(usage, key))
+                        except Exception:  # noqa: BLE001
+                            pass
+        # Coarse estimate only: decode phase scales with completion tokens.
+        # This is NOT provider-ground-truth latency breakdown.
+        est_tok_per_s = 45.0
+        est_decode_s = min(float(api_call_s), float(completion_tokens) / est_tok_per_s)
+        est_prefill_s = max(0.0, float(api_call_s) - est_decode_s)
+
+        def _timing_payload(parse_started_at: float) -> dict[str, float]:
+            return {
+                "prep_s": round(prep_dt, 4),
+                "api_call_s": round(api_call_s, 4),
+                "retry_sleep_s": round(retry_sleep_s, 4),
+                "parse_s": round(time.time() - parse_started_at, 4),
+                "llm_total_s": round(time.time() - chat_t0, 4),
+                "completion_tokens": float(completion_tokens),
+                "est_prefill_s": round(est_prefill_s, 4),
+                "est_decode_s": round(est_decode_s, 4),
+            }
 
         choice = resp.choices[0]
         msg = getattr(choice, "message", None)
@@ -252,6 +394,8 @@ class LLMClient:
                 content=fallback_content,
                 tool_calls=[],
                 raw_message={"role": "assistant", "content": fallback_content},
+                timing=_timing_payload(parse_t0),
+                usage=usage_payload or None,
             )
 
         content = msg.content or ""
@@ -303,4 +447,6 @@ class LLMClient:
             content=content,
             tool_calls=tool_calls,
             raw_message=raw_message,
+            timing=_timing_payload(parse_t0),
+            usage=usage_payload or None,
         )

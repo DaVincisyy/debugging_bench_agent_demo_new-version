@@ -6,13 +6,21 @@ const projectRoot = path.resolve(here, "..", "..", "..");
 
 export function resolveDebuggingAgentDir() {
   if (process.env.VLM_AGENT_DIR) return path.resolve(process.env.VLM_AGENT_DIR);
-  return path.join(projectRoot, "Vlm agent", "Debugging-agent-v2");
+  return path.join(projectRoot, "new_vlm_agent");
 }
 
 export function defaultVlmAgentCasesDir() {
-  return path.join(resolveDebuggingAgentDir(), "data", "cases");
+  // Cases are prepared locally under Inputdemo/ (independent of Vlm agent/ folder).
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const inputdemoDir = path.resolve(here, "..", "..", "..");
+  return path.join(inputdemoDir, "data", "cases");
 }
 
 export function defaultVlmAgentRunsDir() {
+  // When running in remote mode, use the server's workspace path.
+  // Must use forward slashes — path.join on Windows produces backslashes.
+  if (process.env.VLM_AGENT_RUNNER === "remote-svc" || process.env.VLM_AGENT_SERVICE_URL) {
+    return process.env.VLM_AGENT_REMOTE_WORKSPACE || "/opt/vlm-agent/Debugging-agent-v2/workspace/vlm-agent-runs";
+  }
   return path.join(resolveDebuggingAgentDir(), "workspace", "vlm-agent-runs");
 }

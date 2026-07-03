@@ -1,0 +1,7 @@
+{
+  "user_measurement_question": "Sheet1 输入保护那段，上电时我想用示波器抓一下功率管前面那个小信号管（控制功率管开通关断）的波形和时序，看使能/驱动这一级什么时候起来、边沿干不干净。不是看电池或滤波后母线上电斜坡那种纯电源电压点。",
+  "tp_id_or_ref": "TP2",
+  "evidence_zh": "原理图 POWER Filter 区域：Q1 (BC817-40) 为控制功率管 Q2 (BUK9M24-60E) 开通/关断的小信号管。TP2 位于 Q1 基极，通过 R2 连接，可观测使能/驱动信号何时起来及边沿质量。TP1 在集电极侧，TP2 更能反映控制信号时序。",
+  "schematic_section": "POWER Filter",
+  "related_components": ["Q1 (BC817-40)", "Q2 (BUK9M24-60E)", "R2 10K"]
+}

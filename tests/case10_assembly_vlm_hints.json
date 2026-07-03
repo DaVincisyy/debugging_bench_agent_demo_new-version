@@ -1,0 +1,6 @@
+{
+  "approx_bbox_norm": [0.45, 0.20, 0.60, 0.45],
+  "region_hint": "Center-right upper quadrant",
+  "relative_to_tp": "TP2 is to the left and slightly below U501",
+  "visual_cues": "Large square QFP package, labeled U501, many pins on all sides"
+}

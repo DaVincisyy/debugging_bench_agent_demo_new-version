@@ -1,0 +1,325 @@
+{
+  "iteration": 15,
+  "apply_outcome": "skipped_inaccurate_pre_apply",
+  "good_sha_before": "7221f16ef62ccff05baeb3f23ed6b66fea6ed30e",
+  "good_sha_after": "7221f16ef62ccff05baeb3f23ed6b66fea6ed30e",
+  "primary_run": {
+    "run_id": "20260630-163810-task",
+    "part_timing": {
+      "part0_s": 36.3508,
+      "partb_s": 25.3667,
+      "parta_s": 14.1332,
+      "partc_s": 0.0,
+      "partd_s": 12.9802,
+      "unknown_s": 0.0,
+      "total_s": 88.8309
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2074,
+      1166
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2074,
+        1166
+      ],
+      "dx": 36,
+      "dy": 52,
+      "distance_px": 63.2,
+      "within_tolerance": false,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 99284,
+        "completion_tokens": 3106,
+        "total_tokens": 102390,
+        "reasoning_tokens": 1645
+      },
+      "reflection": {
+        "prompt_tokens": 3954,
+        "completion_tokens": 6255,
+        "total_tokens": 10209,
+        "reasoning_tokens": 5033
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 3101,
+        "completion_tokens": 3922,
+        "total_tokens": 7023,
+        "reasoning_tokens": 3313
+      },
+      "combined": {
+        "prompt_tokens": 106339,
+        "completion_tokens": 13283,
+        "total_tokens": 119622,
+        "reasoning_tokens": 8346
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "search_pdf_text",
+          "search_pdf_text"
+        ],
+        "step_total_s": 11.4488,
+        "llm_s": 11.1552,
+        "tools_s": 0.2922,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.3997,
+        "llm_est_decode_s": 7.7556,
+        "prompt_tokens": 10241,
+        "completion_tokens": 349,
+        "total_tokens": 10590
+      },
+      {
+        "step": 1,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 5.0316,
+        "llm_s": 4.9464,
+        "tools_s": 0.0021,
+        "images_attach_s": 0.082,
+        "llm_est_prefill_s": 1.2798,
+        "llm_est_decode_s": 3.6667,
+        "prompt_tokens": 10781,
+        "completion_tokens": 165,
+        "total_tokens": 10946
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text",
+          "mark_tp_on_assembly_from_pdf_hit",
+          "save_text_file"
+        ],
+        "step_total_s": 15.0819,
+        "llm_s": 13.3288,
+        "tools_s": 1.7393,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.2621,
+        "llm_est_decode_s": 10.0667,
+        "prompt_tokens": 13589,
+        "completion_tokens": 453,
+        "total_tokens": 14042
+      },
+      {
+        "step": 3,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 4.7885,
+        "llm_s": 4.7759,
+        "tools_s": 0.002,
+        "images_attach_s": 0.004,
+        "llm_est_prefill_s": 1.9537,
+        "llm_est_decode_s": 2.8222,
+        "prompt_tokens": 6689,
+        "completion_tokens": 127,
+        "total_tokens": 6816
+      },
+      {
+        "step": 4,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 16.3532,
+        "llm_s": 16.3432,
+        "tools_s": 0.003,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 16.3432,
+        "prompt_tokens": 9444,
+        "completion_tokens": 743,
+        "total_tokens": 10187
+      },
+      {
+        "step": 5,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 4.7944,
+        "llm_s": 4.5492,
+        "tools_s": 0.2369,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.3048,
+        "llm_est_decode_s": 3.2444,
+        "prompt_tokens": 9680,
+        "completion_tokens": 146,
+        "total_tokens": 9826
+      },
+      {
+        "step": 6,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 4.2191,
+        "llm_s": 4.205,
+        "tools_s": 0.0017,
+        "images_attach_s": 0.0078,
+        "llm_est_prefill_s": 0.3383,
+        "llm_est_decode_s": 3.8667,
+        "prompt_tokens": 6774,
+        "completion_tokens": 174,
+        "total_tokens": 6948
+      },
+      {
+        "step": 7,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 10.2162,
+        "llm_s": 10.1984,
+        "tools_s": 0.003,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.2873,
+        "llm_est_decode_s": 9.9111,
+        "prompt_tokens": 9513,
+        "completion_tokens": 446,
+        "total_tokens": 9959
+      },
+      {
+        "step": 8,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 3.917,
+        "llm_s": 3.5414,
+        "tools_s": 0.3601,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.5859,
+        "llm_est_decode_s": 1.9556,
+        "prompt_tokens": 9863,
+        "completion_tokens": 88,
+        "total_tokens": 9951
+      },
+      {
+        "step": 9,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors",
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 5.9473,
+        "llm_s": 3.8056,
+        "tools_s": 2.1371,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.1389,
+        "llm_est_decode_s": 2.6667,
+        "prompt_tokens": 6859,
+        "completion_tokens": 120,
+        "total_tokens": 6979
+      },
+      {
+        "step": 10,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 7.0329,
+        "llm_s": 7.0244,
+        "tools_s": 0.0055,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.4689,
+        "llm_est_decode_s": 6.5556,
+        "prompt_tokens": 5851,
+        "completion_tokens": 295,
+        "total_tokens": 6146
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "约束 save_text_file 输出格式为纯 JSON 坐标",
+        "target_files": [
+          "agent/prompts/system_prompt.md",
+          "agent/tools/save_text_file.py"
+        ],
+        "concrete_steps": [
+          "在 agent/prompts/system_prompt.md 的 save_text_file 工具描述中追加严格约束：仅输出标准 JSON 数组，格式为 [{\"x\": int, \"y\": int}]，禁止任何解释性文本或推理过程。",
+          "在 agent/tools/save_text_file.py 的 execute() 函数末尾增加输出后处理逻辑，使用正则 r'\\[.*\\]' 提取首个合法 JSON 块并自动剥离 Markdown 代码块标记。",
+          "更新 agent/config/tool_registry.json 中该工具的 max_completion_tokens 限制为 150，强制截断超长生成。"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "流程编排",
+        "title": "过滤 Phase Handoff 中间调试文件以压缩上下文",
+        "target_files": [
+          "agent/core/context_manager.py",
+          "agent/config/phase_config.yaml"
+        ],
+        "concrete_steps": [
+          "在 agent/core/context_manager.py 的 assemble_phase_context() 函数中插入 artifact 过滤逻辑，仅保留后缀为 .json 和 .jpg 的关键文件。",
+          "添加黑名单正则 r\"(?:_box\\.png|_vlm_hints\\.json|_debug\\.log)$\" 拦截非关键中间产物。",
+          "在 agent/config/phase_config.yaml 新增 handoff_max_artifacts: 5 字段，并在 context_manager.py 中实现按时间戳倒序截断逻辑，超出时自动丢弃最早的非关键文件。"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": null,
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "prompt体积",
+      "title": "约束 save_text_file 输出格式为纯 JSON 坐标",
+      "target_files": [
+        "agent/prompts/system_prompt.md",
+        "agent/tools/save_text_file.py"
+      ],
+      "concrete_steps": [
+        "在 agent/prompts/system_prompt.md 的 save_text_file 工具描述中追加严格约束：仅输出标准 JSON 数组，格式为 [{\"x\": int, \"y\": int}]，禁止任何解释性文本或推理过程。",
+        "在 agent/tools/save_text_file.py 的 execute() 函数末尾增加输出后处理逻辑，使用正则 r'\\[.*\\]' 提取首个合法 JSON 块并自动剥离 Markdown 代码块标记。",
+        "更新 agent/config/tool_registry.json 中该工具的 max_completion_tokens 限制为 150，强制截断超长生成。"
+      ],
+      "risk": "low"
+    },
+    {
+      "id": "A2",
+      "priority": "P0",
+      "category": "流程编排",
+      "title": "过滤 Phase Handoff 中间调试文件以压缩上下文",
+      "target_files": [
+        "agent/core/context_manager.py",
+        "agent/config/phase_config.yaml"
+      ],
+      "concrete_steps": [
+        "在 agent/core/context_manager.py 的 assemble_phase_context() 函数中插入 artifact 过滤逻辑，仅保留后缀为 .json 和 .jpg 的关键文件。",
+        "添加黑名单正则 r\"(?:_box\\.png|_vlm_hints\\.json|_debug\\.log)$\" 拦截非关键中间产物。",
+        "在 agent/config/phase_config.yaml 新增 handoff_max_artifacts: 5 字段，并在 context_manager.py 中实现按时间戳倒序截断逻辑，超出时自动丢弃最早的非关键文件。"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": null,
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 106339,
+      "completion_tokens": 13283,
+      "total_tokens": 119622,
+      "reasoning_tokens": 8346
+    },
+    "qwen_verify_run": null,
+    "qwen_iteration_total": {
+      "prompt_tokens": 106339,
+      "completion_tokens": 13283,
+      "total_tokens": 119622
+    },
+    "cursor_apply": null
+  }
+}

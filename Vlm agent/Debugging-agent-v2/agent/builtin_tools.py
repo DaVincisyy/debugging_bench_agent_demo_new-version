@@ -20,6 +20,7 @@ import math
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -42,6 +43,7 @@ _RUNTIME_PROJECT_ROOT = Path.cwd().resolve()
 _RUNTIME_WORKSPACE = (_RUNTIME_PROJECT_ROOT / "workspace").resolve()
 _RUNTIME_INPUT_PATHS: dict[str, str] = {}
 _RUNTIME_WORKFLOW_MODE: str = "default"
+_RUNTIME_RUN_STARTED_AT: float = 0.0
 
 
 # Part B StepB3 — prove `view_image` ran on the current on-disk red-box PNG
@@ -85,14 +87,40 @@ def _stepb3_record_view_gate(workspace: Path, png_resolved: Path) -> None:
 def set_runtime_context(project_root: Path,
                         workspace: Path,
                         input_paths: dict[str, str] | None = None,
-                        workflow_mode: str | None = None) -> None:
+                        workflow_mode: str | None = None,
+                        run_started_at: float | None = None) -> None:
     """Called by Agent at run start so tools share the same path context."""
     global _RUNTIME_PROJECT_ROOT, _RUNTIME_WORKSPACE, _RUNTIME_INPUT_PATHS
-    global _RUNTIME_WORKFLOW_MODE
+    global _RUNTIME_WORKFLOW_MODE, _RUNTIME_RUN_STARTED_AT
     _RUNTIME_PROJECT_ROOT = project_root.resolve()
     _RUNTIME_WORKSPACE = workspace.resolve()
     _RUNTIME_INPUT_PATHS = dict(input_paths or {})
     _RUNTIME_WORKFLOW_MODE = (workflow_mode or "default").strip() or "default"
+    _RUNTIME_RUN_STARTED_AT = float(run_started_at or 0.0)
+
+
+def _is_stale_runtime_debug_file(p: Path) -> bool:
+    if _RUNTIME_RUN_STARTED_AT <= 0:
+        return False
+    try:
+        rp = p.resolve()
+    except Exception:
+        return False
+    try:
+        rel = rp.relative_to(_RUNTIME_WORKSPACE)
+    except Exception:
+        return False
+    parts = [x.lower() for x in rel.parts]
+    if "debug" not in parts:
+        return False
+    if rp.is_dir():
+        return False
+    try:
+        st = rp.stat()
+        latest_fs_ts = max(float(st.st_mtime), float(st.st_ctime))
+        return latest_fs_ts + 1e-3 < _RUNTIME_RUN_STARTED_AT
+    except OSError:
+        return False
 
 
 def _is_vlm_test_workflow_mode() -> bool:
@@ -183,10 +211,49 @@ def _vlm_test_run_python_guard_physical_board_ic_geometry(code: str) -> ToolResu
 def _resolve_read(path: str) -> Path:
     p = Path(path).expanduser()
     candidates: list[Path] = []
+    stale_candidates: list[Path] = []
 
     if p.is_absolute():
         candidates.append(p)
     else:
+        # Treat plain input key names as indirection to INPUT_PATHS.
+        key = str(p)
+        mapped = _RUNTIME_INPUT_PATHS.get(key)
+        if isinstance(mapped, str) and mapped.strip():
+            mp = Path(mapped).expanduser()
+            candidates.append(mp)
+        # Accept model literals like INPUT_PATHS.front_board_photo or
+        # INPUT_PATHS['front_board_photo'] as input-path indirection.
+        key_txt = key.replace("\\", "/").strip()
+        dotted_key = None
+        m = re.fullmatch(r"(?i)input_paths\.([A-Za-z0-9_-]+)", key_txt)
+        if m:
+            dotted_key = m.group(1)
+        else:
+            m2 = re.fullmatch(r"(?i)input_paths\[['\"]([^'\"]+)['\"]\]", key_txt)
+            if m2:
+                dotted_key = m2.group(1)
+        if dotted_key:
+            mv2 = _RUNTIME_INPUT_PATHS.get(dotted_key)
+            if isinstance(mv2, str) and mv2.strip():
+                candidates.append(Path(mv2).expanduser())
+        # Map common mistaken forms like inputs/front_board_photo.png -> INPUT_PATHS['front_board_photo'].
+        norm = str(p).replace("\\", "/")
+        low = norm.lower()
+        if low.startswith("inputs/") or low.startswith("input/"):
+            leaf = Path(norm).name
+            stem = Path(leaf).stem
+            for k in (leaf, stem):
+                mv = _RUNTIME_INPUT_PATHS.get(k)
+                if isinstance(mv, str) and mv.strip():
+                    candidates.append(Path(mv).expanduser())
+            # Fuzzy contains match by stem.
+            if stem:
+                for k, v in _RUNTIME_INPUT_PATHS.items():
+                    if not isinstance(v, str):
+                        continue
+                    if stem.lower() in str(k).lower():
+                        candidates.append(Path(v).expanduser())
         # 1) As provided (relative to process cwd, usually project root)
         candidates.append((Path.cwd() / p))
         # 2) Relative to workspace (helps view_image("foo.png") after run_python)
@@ -208,7 +275,17 @@ def _resolve_read(path: str) -> Path:
             continue
         seen.add(key)
         if cr.exists():
+            if _is_stale_runtime_debug_file(cr):
+                stale_candidates.append(cr)
+                continue
             return cr
+
+    if stale_candidates:
+        raise FileNotFoundError(
+            "Refusing to read stale debug artifact from previous runs. "
+            "Regenerate it in current run. Stale path examples: "
+            + ", ".join(str(c) for c in stale_candidates[:3])
+        )
 
     raise FileNotFoundError(
         f"File does not exist: {p}. Tried: " + ", ".join(str(c) for c in candidates[:6])
@@ -641,6 +718,777 @@ def _tool_save_text_file(workspace: Path, path: str, content: str) -> ToolResult
     return ToolResult(text=f"Wrote {len(content)} chars to {p}")
 
 
+def _tool_mark_tp_on_assembly_from_pdf_hit(
+    workspace: Path,
+    search_json_path: str = "debug/case10_target_tp_pdf_search.json",
+    assembly_png_path: str = "debug/case10_assembly_drawing.png",
+    assembly_pdf_path: str = "",
+    hit_index: int = 0,
+    roi_half: int = 50,
+    out_work_roi_path: str = "debug/case10_target_tp_work_roi.png",
+    out_marked_path: str = "debug/case10_assembly_drawing_tp_marked.png",
+) -> ToolResult:
+    """Use PDF hit rect to mark TP circle on assembly drawing PNG.
+
+    Workflow:
+    1) Read `search_json_path` and pick one hit (`hit_index`)
+    2) Map hit `rect_pdf` center to assembly PNG pixels using PDF page size
+    3) Crop fixed ROI around mapped center and save `out_work_roi_path`
+    4) Detect circular pad inside ROI, map circle back to full image
+    5) Draw green circle and save `out_marked_path`
+    """
+    try:
+        import cv2  # type: ignore
+        import fitz  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[mark-tp-tool] missing dependency: {e}", ok=False)
+
+    canonical_rel = "debug/case10_assembly_drawing.png"
+    canonical_png = _resolve_write(workspace, canonical_rel)
+
+    def _materialize_canonical(src_path: Path) -> Path:
+        """Ensure canonical Part0 drawing artifact exists for downstream checks."""
+        try:
+            if src_path.resolve() == canonical_png.resolve():
+                return src_path
+        except Exception:
+            pass
+        # Use copyfile (not copy2) so mtime is current run.
+        shutil.copyfile(src_path, canonical_png)
+        return canonical_png
+
+    def _ensure_fresh_assembly_png() -> Path:
+        """Return a current-run assembly PNG and materialize canonical debug path."""
+        # First try as requested.
+        try:
+            p = _resolve_read(assembly_png_path)
+            if not _is_stale_runtime_debug_file(p):
+                return _materialize_canonical(p)
+        except Exception:
+            pass
+
+        # If stale/missing, refresh from provided page-1 PNG input when available.
+        src = _RUNTIME_INPUT_PATHS.get("assembly_drawing_page1_png")
+        if isinstance(src, str) and src.strip():
+            src_p = _resolve_read(src)
+            shutil.copyfile(src_p, canonical_png)
+            return canonical_png
+
+        # Fallback to the original behavior (will raise meaningful error).
+        p = _resolve_read(assembly_png_path)
+        return _materialize_canonical(p)
+
+    try:
+        search_p = _resolve_read(search_json_path)
+        search_obj = json.loads(search_p.read_text(encoding="utf-8"))
+        hits = search_obj.get("hits")
+        if not isinstance(hits, list) or not hits:
+            return ToolResult(
+                text="[mark-tp-tool] search JSON has no `hits` list.",
+                ok=False,
+            )
+        if hit_index < 0 or hit_index >= len(hits):
+            return ToolResult(
+                text=f"[mark-tp-tool] hit_index out of range: {hit_index}, hits={len(hits)}",
+                ok=False,
+            )
+        hit = hits[hit_index]
+        if not isinstance(hit, dict):
+            return ToolResult(text="[mark-tp-tool] selected hit is not an object.", ok=False)
+        rect_pdf = hit.get("rect_pdf")
+        if (
+            not isinstance(rect_pdf, list)
+            or len(rect_pdf) != 4
+            or not all(isinstance(v, (int, float)) for v in rect_pdf)
+        ):
+            return ToolResult(
+                text="[mark-tp-tool] selected hit missing valid rect_pdf [x0,y0,x1,y1].",
+                ok=False,
+            )
+        page_num = int(hit.get("page", 1))
+        pdf_path_use = assembly_pdf_path.strip() if isinstance(assembly_pdf_path, str) else ""
+        if not pdf_path_use:
+            pdf_path_use = str(search_obj.get("pdf_path") or "")
+        if not pdf_path_use:
+            return ToolResult(
+                text="[mark-tp-tool] assembly_pdf_path not provided and pdf_path missing in search JSON.",
+                ok=False,
+            )
+        pdf_p = _resolve_read(pdf_path_use)
+        png_p = _ensure_fresh_assembly_png()
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[mark-tp-tool] input resolve/read failed: {e}", ok=False)
+
+    img = cv2.imread(str(png_p))
+    if img is None:
+        return ToolResult(text=f"[mark-tp-tool] failed to read PNG: {png_p}", ok=False)
+    H, W = img.shape[:2]
+
+    try:
+        doc = fitz.open(str(pdf_p))
+        page = doc.load_page(max(0, page_num - 1))
+        pw, ph = float(page.rect.width), float(page.rect.height)
+        doc.close()
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[mark-tp-tool] failed to read PDF page size: {e}", ok=False)
+    if pw <= 0 or ph <= 0:
+        return ToolResult(text="[mark-tp-tool] invalid PDF page dimensions.", ok=False)
+
+    sx, sy = W / pw, H / ph
+    x0, y0, x1, y1 = [float(v) for v in rect_pdf]
+    cx_pdf = (x0 + x1) / 2.0
+    cy_pdf = (y0 + y1) / 2.0
+    cx = int(round(cx_pdf * sx))
+    cy = int(round(cy_pdf * sy))
+
+    half = max(12, int(roi_half))
+    wl = max(0, cx - half)
+    wt = max(0, cy - half)
+    wr = min(W, cx + half)
+    wb = min(H, cy + half)
+    if wr <= wl or wb <= wt:
+        return ToolResult(text="[mark-tp-tool] invalid ROI after clamp.", ok=False)
+
+    roi = img[wt:wb, wl:wr].copy()
+    out_roi = _resolve_write(workspace, out_work_roi_path)
+    if not cv2.imwrite(str(out_roi), roi):
+        return ToolResult(text=f"[mark-tp-tool] failed to write ROI: {out_roi}", ok=False)
+
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, th = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    th = cv2.dilate(th, kernel, iterations=1)
+    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    refx, refy = cx - wl, cy - wt
+    cands: list[dict[str, float]] = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area < 30:
+            continue
+        peri = float(cv2.arcLength(cnt, True))
+        if peri <= 0:
+            continue
+        circ = 4.0 * math.pi * area / (peri * peri)
+        x, y, ww, hh = cv2.boundingRect(cnt)
+        aspect = min(ww, hh) / max(ww, hh) if max(ww, hh) > 0 else 0.0
+        (xc, yc), r = cv2.minEnclosingCircle(cnt)
+        circle_area = math.pi * r * r
+        area_ratio = area / circle_area if circle_area > 0 else 0.0
+        if circ >= 0.55 and aspect >= 0.55 and 0.10 <= area_ratio <= 1.12:
+            dist = float(((xc - refx) ** 2 + (yc - refy) ** 2) ** 0.5)
+            cands.append({"xc": float(xc), "yc": float(yc), "r": float(r), "dist": dist, "circ": float(circ)})
+
+    if not cands:
+        return ToolResult(
+            text=(
+                "[mark-tp-tool] no circular candidate found in ROI.\n"
+                f"roi=[{wl},{wt},{wr},{wb}] size={wr-wl}x{wb-wt}"
+            ),
+            ok=False,
+            images=[str(out_roi)],
+        )
+
+    best = min(cands, key=lambda c: c["dist"])
+    gx = int(round(wl + best["xc"]))
+    gy = int(round(wt + best["yc"]))
+    gr = max(3, int(round(best["r"])))
+
+    marked = img.copy()
+    cv2.circle(marked, (gx, gy), gr, (0, 255, 0), 3)
+    out_mark = _resolve_write(workspace, out_marked_path)
+    if not cv2.imwrite(str(out_mark), marked):
+        return ToolResult(text=f"[mark-tp-tool] failed to write marked image: {out_mark}", ok=False)
+
+    return ToolResult(
+        text=(
+            "TP marking from PDF hit completed.\n"
+            f"pdf={pdf_p}\n"
+            f"png={png_p}\n"
+            f"rect_pdf={rect_pdf}\n"
+            f"scale=({sx:.6f}, {sy:.6f})\n"
+            f"roi=[{wl},{wt},{wr},{wb}] size={wr-wl}x{wb-wt}\n"
+            f"tp_center=({gx},{gy}) radius={gr}\n"
+            f"saved:\n- {out_roi}\n- {out_mark}"
+        ),
+        images=[str(out_roi), str(out_mark)],
+    )
+
+
+def _tool_detect_largest_ic_on_assembly_from_vlm_hint(
+    workspace: Path,
+    assembly_path: str = "debug/case10_assembly_drawing_tp_marked.png",
+    hints_json_path: str = "debug/case10_assembly_vlm_hints.json",
+    work_margin_ratio: float = 0.2,
+    out_debug_path: str = "debug/case10_assembly_opencv_debug.png",
+    out_box_path: str = "debug/case10_assembly_largest_ic_box.png",
+    out_json_path: str = "debug/case10_assembly_largest_ic.json",
+) -> ToolResult:
+    """Deterministic PartB tool using the 20260527-135827 successful baseline."""
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[assembly-ic-tool] missing dependency: {e}", ok=False)
+
+    try:
+        img_p = _resolve_read(assembly_path)
+        hints_p = _resolve_read(hints_json_path)
+        hints = json.loads(hints_p.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[assembly-ic-tool] failed to load inputs: {e}", ok=False)
+
+    img = cv2.imread(str(img_p))
+    if img is None:
+        return ToolResult(text=f"[assembly-ic-tool] failed to read image: {img_p}", ok=False)
+    H, W = img.shape[:2]
+
+    vlm = hints.get("vlm_roi")
+    if isinstance(vlm, dict):
+        try:
+            l = int(vlm["left"])
+            t = int(vlm["top"])
+            r = int(vlm["right"])
+            b = int(vlm["bottom"])
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(text=f"[assembly-ic-tool] invalid `vlm_roi`: {e}", ok=False)
+    else:
+        norm = hints.get("approx_bbox_norm")
+        if not (
+            isinstance(norm, list)
+            and len(norm) == 4
+            and all(isinstance(v, (int, float)) for v in norm)
+        ):
+            return ToolResult(
+                text="[assembly-ic-tool] hints JSON must contain `vlm_roi` or `approx_bbox_norm`.",
+                ok=False,
+            )
+        x1n, y1n, x2n, y2n = [float(v) for v in norm]
+        l = int(round(x1n * W))
+        t = int(round(y1n * H))
+        r = int(round(x2n * W))
+        b = int(round(y2n * H))
+
+    l = max(0, min(l, W))
+    t = max(0, min(t, H))
+    r = max(0, min(r, W))
+    b = max(0, min(b, H))
+    if r <= l or b <= t:
+        return ToolResult(text="[assembly-ic-tool] invalid VLM ROI after clamp.", ok=False)
+    vlm_roi = [l, t, r, b]
+
+    rw = r - l
+    rh = b - t
+    ratio = max(0.05, min(0.6, float(work_margin_ratio)))
+    pad = max(64, int(round(ratio * max(rw, rh))))
+    wl, wt = max(0, l - pad), max(0, t - pad)
+    wr, wb = min(W, r + pad), min(H, b + pad)
+    if wr <= wl or wb <= wt:
+        return ToolResult(text="[assembly-ic-tool] invalid work ROI after expansion.", ok=False)
+    work_roi = [wl, wt, wr, wb]
+    work = img[wt:wb, wl:wr]
+
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask = cv2.dilate(mask, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: list[dict[str, Any]] = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area < 5000:
+            continue
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        if ch <= 0:
+            continue
+        ar = cw / float(ch)
+        if not (0.5 <= ar <= 1.5):
+            continue
+        gx, gy = wl + x, wt + y
+        candidates.append(
+            {
+                "bbox": [gx, gy, gx + cw, gy + ch],
+                "bbox_area": float(cw * ch),
+                "contour_area": float(area),
+                "aspect_ratio": float(ar),
+            }
+        )
+    candidates.sort(key=lambda c: float(c["bbox_area"]), reverse=True)
+    if not candidates:
+        out_dbg = _resolve_write(workspace, out_debug_path)
+        cv2.imwrite(str(out_dbg), img)
+        return ToolResult(
+            text=(
+                "[assembly-ic-tool] No candidate found in work ROI.\n"
+                f"image={W}x{H}\nvlm_roi_px={vlm_roi}\nwork_roi_px={work_roi}"
+            ),
+            ok=False,
+            images=[str(out_dbg)],
+        )
+
+    final = [int(v) for v in candidates[0]["bbox"]]
+    dbg = img.copy()
+    cv2.rectangle(dbg, (l, t), (r, b), (0, 255, 0), 2)
+    cv2.rectangle(dbg, (wl, wt), (wr, wb), (255, 0, 0), 2)
+    cv2.rectangle(dbg, (final[0], final[1]), (final[2], final[3]), (0, 0, 255), 4)
+    out_dbg = _resolve_write(workspace, out_debug_path)
+    cv2.imwrite(str(out_dbg), dbg)
+
+    marked = img.copy()
+    cv2.rectangle(marked, (final[0], final[1]), (final[2], final[3]), (0, 0, 255), 4)
+    out_box = _resolve_write(workspace, out_box_path)
+    cv2.imwrite(str(out_box), marked)
+
+    payload = {
+        "vlm_roi_px": vlm_roi,
+        "work_roi_px": work_roi,
+        "largest_ic_bbox": final,
+        "bbox": final,
+        "image_size": [W, H],
+        "opencv_params": {
+            "threshold_binary_inv": 180,
+            "kernel_shape": "MORPH_RECT",
+            "kernel_size": [3, 3],
+            "dilate_iter": 1,
+            "min_contour_area": 5000,
+            "aspect_ratio": [0.5, 1.5],
+            "ranking": "max_bbox_area",
+        },
+        "candidate_count": len(candidates),
+    }
+    out_json = _resolve_write(workspace, out_json_path)
+    out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    mask_path = _resolve_write(workspace, "debug/case10_assembly_opencv_mask.png")
+    cv2.imwrite(str(mask_path), mask)
+
+    return ToolResult(
+        text=(
+            "Assembly largest-IC detection completed.\n"
+            f"image={W}x{H}\n"
+            f"vlm_roi_px={vlm_roi}\n"
+            f"work_roi_px={work_roi}\n"
+            f"final_bbox={final}\n"
+            f"candidate_count={len(candidates)}"
+        ),
+        images=[str(out_dbg), str(out_box), str(mask_path)],
+    )
+
+
+def _tool_detect_largest_ic_on_board_from_vlm_hint(
+    workspace: Path,
+    board_path: str = "INPUT_PATHS.front_board_photo",
+    hints_json_path: str = "debug/case10_vlm_hints.json",
+    work_margin_ratio: float = 0.2,
+    out_debug_path: str = "debug/case10_opencv_debug.png",
+    out_box_path: str = "debug/case10_largest_ic_box.png",
+    out_json_path: str = "debug/case10_largest_ic.json",
+) -> ToolResult:
+    """Detect largest IC on board image using VLM ROI hints.
+
+    Uses the historically stable baseline:
+    - threshold(binary_inv) with low values (multi-try around 40)
+    - 5x5 morphology, dilate=3 then erode=2
+    - contour area + rectangularity/aspect screening
+    """
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[board-ic-tool] missing dependency: {e}", ok=False)
+
+    try:
+        try:
+            board_p = _resolve_read(board_path)
+        except Exception:
+            fb = _RUNTIME_INPUT_PATHS.get("front_board_photo")
+            if isinstance(fb, str) and fb.strip():
+                board_p = _resolve_read(fb)
+            else:
+                raise
+        try:
+            hints_p = _resolve_read(hints_json_path)
+        except Exception:
+            hints_p = _resolve_read("debug/case10_board_vlm_hints.json")
+        hints = json.loads(hints_p.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[board-ic-tool] failed to load inputs: {e}", ok=False)
+
+    img = cv2.imread(str(board_p))
+    if img is None:
+        return ToolResult(text=f"[board-ic-tool] failed to read board image: {board_p}", ok=False)
+    H, W = img.shape[:2]
+    # Prefer VLM's precise pixel vlm_roi (written after viewing image at known WxH).
+    # Fall back to normalized approx_bbox_norm.
+    vlm_raw = hints.get("vlm_roi")
+    if isinstance(vlm_raw, dict) and all(k in vlm_raw for k in ("left", "top", "right", "bottom")):
+        x1 = int(vlm_raw["left"])
+        y1 = int(vlm_raw["top"])
+        x2 = int(vlm_raw["right"])
+        y2 = int(vlm_raw["bottom"])
+    else:
+        bbox_norm = hints.get("approx_bbox_norm")
+        if (
+            isinstance(bbox_norm, list)
+            and len(bbox_norm) == 4
+            and all(isinstance(v, (int, float)) for v in bbox_norm)
+        ):
+            x1n, y1n, x2n, y2n = [float(v) for v in bbox_norm]
+            if not (0.0 <= x1n <= 1.0 and 0.0 <= y1n <= 1.0 and 0.0 <= x2n <= 1.0 and 0.0 <= y2n <= 1.0):
+                return ToolResult(text="[board-ic-tool] approx_bbox_norm values must be in [0,1].", ok=False)
+            if x2n <= x1n or y2n <= y1n:
+                return ToolResult(text="[board-ic-tool] approx_bbox_norm must satisfy x2>x1 and y2>y1.", ok=False)
+            x1 = int(round(x1n * W))
+            y1 = int(round(y1n * H))
+            x2 = int(round(x2n * W))
+            y2 = int(round(y2n * H))
+        else:
+            return ToolResult(
+                text="[board-ic-tool] hints JSON must contain `vlm_roi` {left,top,right,bottom} or `approx_bbox_norm` [x1n,y1n,x2n,y2n].",
+                ok=False,
+            )
+    x1 = max(0, min(W, x1))
+    y1 = max(0, min(H, y1))
+    x2 = max(0, min(W, x2))
+    y2 = max(0, min(H, y2))
+    if x2 <= x1 or y2 <= y1:
+        return ToolResult(text="[board-ic-tool] invalid VLM ROI after clamp.", ok=False)
+    vlm_roi = [x1, y1, x2, y2]
+
+    margin_ratio = max(0.10, min(0.6, float(work_margin_ratio)))
+    mx = int(round((x2 - x1) * margin_ratio))
+    my = int(round((y2 - y1) * margin_ratio))
+    wx1 = max(0, x1 - mx)
+    wy1 = max(0, y1 - my)
+    wx2 = min(W, x2 + mx)
+    wy2 = min(H, y2 + my)
+    if wx2 <= wx1 or wy2 <= wy1:
+        return ToolResult(text="[board-ic-tool] invalid work ROI after expansion.", ok=False)
+    work_roi = [wx1, wy1, wx2, wy2]
+    roi = img[wy1:wy2, wx1:wx2]
+    rh, rw = roi.shape[:2]
+    roi_area = float(max(1, rw * rh))
+    bp = hints.get("opencv_ballpark") if isinstance(hints.get("opencv_ballpark"), dict) else {}
+    use_hsv = bool(bp.get("prefer_hsv_dark_package", False))
+    if use_hsv:
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        vu = int(bp.get("hsv_upper_v", 60))
+        lo, hi = (0, 0, 0), (180, 255, max(1, vu))
+        bw = cv2.inRange(hsv, lo, hi)
+        ksz = int(bp.get("morph_kernel_size", 5))
+        di = int(bp.get("morph_dilate_iter", 2))
+        ei = int(bp.get("morph_erode_iter", 1))
+        threshold_used = None
+    else:
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        tv = int(bp.get("fixed_thresh_inv_dark", 60))
+        _, bw = cv2.threshold(gray, tv, 255, cv2.THRESH_BINARY_INV)
+        dker = bp.get("dilate_kernel")
+        if isinstance(dker, list) and len(dker) >= 2 and isinstance(dker[0], (int, float)):
+            ksz = int(dker[0])
+        else:
+            ksz = int(bp.get("morph_kernel_size", 3))
+        di = int(bp.get("dilate_iter", bp.get("morph_dilate_iter", 1)))
+        ei = int(bp.get("erode_iter", bp.get("morph_erode_iter", 0)))
+        threshold_used = tv
+
+    k = max(3, int(ksz) | 1)
+    ker = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    bw = cv2.dilate(bw, ker, iterations=max(0, int(di)))
+    if int(ei) > 0:
+        bw = cv2.erode(bw, ker, iterations=int(ei))
+
+    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    total_contours = len(contours)
+    min_a = float(bp.get("min_contour_area", 10000))
+    asp = bp.get("aspect_ratio")
+    if isinstance(asp, (list, tuple)) and len(asp) == 2:
+        ar_lo, ar_hi = float(asp[0]), float(asp[1])
+    else:
+        ar_lo, ar_hi = 0.0, 999.0
+    ss = bp.get("package_short_side_px")
+    if isinstance(ss, (list, tuple)) and len(ss) == 2:
+        ss_lo, ss_hi = int(ss[0]), int(ss[1])
+    else:
+        ss_lo, ss_hi = 0, 999999
+
+    candidates: list[dict[str, Any]] = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area < min_a:
+            continue
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        if ch <= 0:
+            continue
+        ar = cw / float(ch)
+        short = min(cw, ch)
+        if ar < ar_lo or ar > ar_hi or short < ss_lo or short > ss_hi:
+            continue
+        rect_area = float(max(1, cw * ch))
+        cover_ratio = rect_area / roi_area
+        touch_l = x <= 2
+        touch_t = y <= 2
+        touch_r = (x + cw) >= (rw - 2)
+        touch_b = (y + ch) >= (rh - 2)
+        touch_cnt = int(touch_l) + int(touch_t) + int(touch_r) + int(touch_b)
+        if cover_ratio > 0.90 and touch_cnt >= 3:
+            continue
+        candidates.append({
+            "x": int(x), "y": int(y), "w": int(cw), "h": int(ch),
+            "area": float(area), "aspect": float(ar),
+            "cover_ratio": float(cover_ratio), "touch_cnt": int(touch_cnt),
+            "bbox_area": float(cw * ch),
+        })
+
+    candidates.sort(key=lambda c: float(c["area"]), reverse=True)
+    best = candidates[0] if candidates else None
+    best_mask = bw
+
+    if best is None:
+        dbg = _resolve_write(workspace, out_debug_path)
+        cv2.imwrite(str(dbg), img)
+        return ToolResult(
+            text=(
+                "[board-ic-tool] No IC contour found in work ROI.\n"
+                f"image={W}x{H}\n"
+                f"vlm_roi_px={vlm_roi}\n"
+                f"work_roi_px={work_roi}\n"
+                f"params: use_hsv={use_hsv} k={k} dilate={di} erode={ei} min_area={min_a}"
+            ),
+            ok=False,
+            images=[str(dbg)],
+        )
+
+    fx1 = wx1 + int(best["x"])
+    fy1 = wy1 + int(best["y"])
+    fx2 = fx1 + int(best["w"])
+    fy2 = fy1 + int(best["h"])
+    final_bbox = [fx1, fy1, fx2, fy2]
+
+    debug_img = img.copy()
+    cv2.rectangle(debug_img, (vlm_roi[0], vlm_roi[1]), (vlm_roi[2], vlm_roi[3]), (255, 0, 0), 3)
+    cv2.rectangle(debug_img, (work_roi[0], work_roi[1]), (work_roi[2], work_roi[3]), (0, 255, 255), 2)
+    cv2.rectangle(debug_img, (fx1, fy1), (fx2, fy2), (0, 0, 255), 4)
+    out_dbg = _resolve_write(workspace, out_debug_path)
+    cv2.imwrite(str(out_dbg), debug_img)
+
+    marked = img.copy()
+    cv2.rectangle(marked, (fx1, fy1), (fx2, fy2), (0, 0, 255), 4)
+    out_box = _resolve_write(workspace, out_box_path)
+    cv2.imwrite(str(out_box), marked)
+
+    out_json = _resolve_write(workspace, out_json_path)
+    payload = {
+        "vlm_roi_px": vlm_roi,
+        "work_roi_px": work_roi,
+        "largest_ic_bbox": final_bbox,
+        "bbox": final_bbox,
+        "area": float(best["area"]),
+        "threshold_used": threshold_used,
+        "aspect": round(float(best["aspect"]), 4),
+        "cover_ratio": round(float(best["cover_ratio"]), 4),
+        "touch_edges": int(best["touch_cnt"]),
+        "candidate_stats": {"total_contours": int(total_contours), "kept_candidates": int(len(candidates))},
+        "opencv_params": {
+            "use_hsv_dark_package": bool(use_hsv),
+            "hsv_upper_v": int(bp.get("hsv_upper_v", 60)) if use_hsv else None,
+            "fixed_thresh_inv_dark": int(threshold_used) if threshold_used is not None else None,
+            "kernel_size": int(k),
+            "dilate_iter": int(di),
+            "erode_iter": int(ei),
+            "min_contour_area": float(min_a),
+            "aspect_ratio": [ar_lo, ar_hi],
+            "package_short_side_px": [ss_lo, ss_hi],
+        },
+        "image_size": [W, H],
+    }
+    out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    mask_path = _resolve_write(workspace, "debug/case10_thresh_debug.png")
+    if best_mask is not None:
+        cv2.imwrite(str(mask_path), best_mask)
+
+    return ToolResult(
+        text=(
+            "Board largest-IC detection completed.\n"
+            f"image={W}x{H}\n"
+            f"vlm_roi_px={vlm_roi}\n"
+            f"work_roi_px={work_roi}\n"
+            f"final_bbox={final_bbox}\n"
+            f"area={float(best['area']):.1f} threshold={threshold_used}\n"
+            f"cover_ratio={float(best['cover_ratio']):.3f} touch_edges={int(best['touch_cnt'])}\n"
+            f"candidates(total={int(total_contours)}, kept={int(len(candidates))})"
+        ),
+        images=[str(out_dbg), str(out_box), str(mask_path)],
+    )
+
+
+def _tool_case12_build_and_align_from_step02_anchors(
+    workspace: Path,
+    locator_anchor_path: str = "debug/case10_assembly_largest_ic_box.png",
+    board_anchor_path: str = "debug/case10_largest_ic_box.png",
+) -> ToolResult:
+    """PartD dedicated tool: build locator graph and align to board from two anchors."""
+    try:
+        from case12_step02_graph import (
+            run_align_locator_graph_to_board_ic_bbox,
+            run_build_step02_locator_graph,
+        )
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[case12-step02-tool] import failed: {e}", ok=False)
+
+    try:
+        src_loc = _resolve_read(locator_anchor_path)
+        src_board = _resolve_read(board_anchor_path)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[case12-step02-tool] failed to resolve input anchors: {e}", ok=False)
+
+    ws = workspace.resolve()
+    if not (ws / "debug").is_dir() and (ws / "workspace" / "debug").is_dir():
+        ws = (ws / "workspace").resolve()
+    dbg = ws / "debug"
+    dbg.mkdir(parents=True, exist_ok=True)
+
+    fixed_loc = dbg / "step02_locator_front_anchor.png"
+    fixed_board = dbg / "step02_board_front_anchor.png"
+    if src_loc.resolve() != fixed_loc.resolve():
+        shutil.copy2(src_loc, fixed_loc)
+    if src_board.resolve() != fixed_board.resolve():
+        shutil.copy2(src_board, fixed_board)
+
+    try:
+        graph_obj = run_build_step02_locator_graph(ws)
+        aligned_obj = run_align_locator_graph_to_board_ic_bbox(ws)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[case12-step02-tool] build/align failed: {e}", ok=False)
+
+    out_json = dbg / "case12_step02_locator_graph.json"
+    out_png = dbg / "case12_step02_locator_graph.png"
+    aligned_json = dbg / "case12_board_points_aligned.json"
+    overlay_png = dbg / "case12_board_approx_overlay_opencv.png"
+    return ToolResult(
+        text=(
+            "case12 Step02 graph build+align completed.\n"
+            f"workspace={ws}\n"
+            f"locator_anchor={fixed_loc}\n"
+            f"board_anchor={fixed_board}\n"
+            f"graph_json={out_json}\n"
+            f"aligned_json={aligned_json}\n"
+            f"graph_nodes={len(graph_obj.get('references', [])) if isinstance(graph_obj, dict) else 'n/a'}\n"
+            f"aligned_source={aligned_obj.get('source') if isinstance(aligned_obj, dict) else 'n/a'}"
+        ),
+        images=[str(out_png), str(overlay_png)],
+    )
+
+
+def _tool_emit_step08_from_case12_aligned(
+    workspace: Path,
+    aligned_json_path: str = "debug/case12_board_points_aligned.json",
+    board_anchor_path: str = "debug/step02_board_front_anchor.png",
+    out_step08_png_path: str = "debug/step08_final_tp.png",
+    out_step08_json_path: str = "debug/step08_result.json",
+    out_mapping_json_path: str = "debug/step03_mapping.json",
+    mapping_method: str | None = None,
+) -> ToolResult:
+    """Generate Step08 outputs from case12 aligned target in one deterministic step."""
+    try:
+        aligned_p = _resolve_read(aligned_json_path)
+        board_p = _resolve_read(board_anchor_path)
+        aligned = json.loads(aligned_p.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[case12-step08-tool] failed to load inputs: {e}", ok=False)
+
+    tgt = aligned.get("board_roi_target_px_approx")
+    if not (isinstance(tgt, list) and len(tgt) == 2):
+        return ToolResult(
+            text="[case12-step08-tool] aligned JSON must include `board_roi_target_px_approx: [x,y]`.",
+            ok=False,
+        )
+    try:
+        tx = float(tgt[0])
+        ty = float(tgt[1])
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[case12-step08-tool] invalid target point: {e}", ok=False)
+
+    source = str(aligned.get("source", "")).strip()
+    inferred_method = "case12_step02_opencv_ic_align"
+    if source == "vlm_ic_correspondence_isotropic_align":
+        inferred_method = "case12_step02_vlm_ic_align"
+    elif source == "opencv_ic_bbox_isotropic_align":
+        inferred_method = "case12_step02_opencv_ic_align"
+    final_method = inferred_method
+    if isinstance(mapping_method, str) and mapping_method.strip() in {
+        "case12_step02_opencv_ic_align",
+        "case12_step02_vlm_ic_align",
+    }:
+        final_method = mapping_method.strip()
+
+    with Image.open(board_p) as im:
+        base = im.convert("RGB")
+    w, h = base.size
+    x = int(round(max(0.0, min(float(w - 1), tx))))
+    y = int(round(max(0.0, min(float(h - 1), ty))))
+    r = 15
+    draw = ImageDraw.Draw(base)
+    draw.ellipse((x - r, y - r, x + r, y + r), outline="red", width=3)
+    draw.line((x - r - 8, y, x + r + 8, y), fill="red", width=3)
+    draw.line((x, y - r - 8, x, y + r + 8), fill="red", width=3)
+    draw.text((min(x + r + 8, w - 120), max(0, y - r - 16)), "TP", fill="red")
+
+    out_png = _resolve_write(workspace, out_step08_png_path)
+    base.save(out_png)
+
+    out_json = _resolve_write(workspace, out_step08_json_path)
+    selected_id = "TP_candidate"
+    # Highest priority: keep existing selected_id if already set in step08_result.json.
+    try:
+        if out_json.exists():
+            prev_o = json.loads(out_json.read_text(encoding="utf-8"))
+            prev_sid = prev_o.get("selected_id")
+            if isinstance(prev_sid, str) and prev_sid.strip():
+                selected_id = prev_sid.strip()
+    except Exception:
+        pass
+    # Next priority: infer TP id from Part0 signal file.
+    try:
+        sig_p = _resolve_read("debug/case10_signal_to_tp.json")
+        sig_o = json.loads(sig_p.read_text(encoding="utf-8"))
+        sid = sig_o.get("tp_id_or_ref") or sig_o.get("tp_id")
+        if isinstance(sid, str) and sid.strip():
+            selected_id = sid.strip()
+    except Exception:
+        pass
+    out_json_obj = {
+        "selected_id": selected_id,
+        "marker_radius": int(r),
+        "pixel": [int(x), int(y)],
+    }
+    out_json.write_text(json.dumps(out_json_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    out_map = _resolve_write(workspace, out_mapping_json_path)
+    map_obj = {
+        "mapping_method": str(final_method),
+        "tp_prior_board": [float(tx), float(ty)],
+        "tp_board_rounded": [int(x), int(y)],
+        "source": source or "case12_aligned_json",
+    }
+    out_map.write_text(json.dumps(map_obj, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return ToolResult(
+        text=(
+            "Step08 outputs generated from case12 aligned target.\n"
+            f"aligned_json={aligned_p}\n"
+            f"board_anchor={board_p} ({w}x{h})\n"
+            f"target_float=[{tx:.3f}, {ty:.3f}] -> pixel=[{x}, {y}]\n"
+            f"mapping_method={final_method} (inferred from source={source or 'n/a'})\n"
+            f"saved:\n- {out_png}\n- {out_json}\n- {out_map}"
+        ),
+        images=[str(out_png)],
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Image tools
 # --------------------------------------------------------------------------- #
@@ -668,6 +1516,13 @@ def _tool_view_image(path: str, note: str = "") -> ToolResult:
             ok=False,
         )
     text = f"Attached image: {p}"
+    try:
+        from PIL import Image as PILImage
+        with PILImage.open(p) as im:
+            iw, ih = im.size
+        text += f" ({iw}x{ih} px)"
+    except Exception:
+        pass
     if note:
         text += f"\nNote: {note}"
     if _is_stepb3_assembly_largest_ic_box_png(p):
@@ -2230,6 +3085,8 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
     _PY_GLOBALS["normalize_path"] = _normalize_runtime_path
     _PY_GLOBALS["resolve_read"] = lambda p: str(_resolve_read(_normalize_runtime_path(p)))
     prev_cwd = os.getcwd()
+    prev_env_workspace = os.environ.get("WORKSPACE")
+    prev_env_project_root = os.environ.get("PROJECT_ROOT")
     # Temporary monkey-patches to make model-generated code robust on Windows
     # (unicode paths, relative roots, workspace/ prefix confusion).
     orig_exists = os.path.exists
@@ -2260,28 +3117,12 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
             return orig_exists(path_like)
 
     def _patched_open(file: Any, *args: Any, **kwargs: Any):
-        patched_kwargs = dict(kwargs)
-        mode = "r"
-        if args:
-            mode = str(args[0])
-        elif "mode" in patched_kwargs:
-            mode = str(patched_kwargs["mode"])
-        if (
-            "b" not in mode
-            and "encoding" not in patched_kwargs
-            and any(flag in mode for flag in ("r", "w", "a", "x"))
-        ):
-            patched_kwargs["encoding"] = "utf-8"
         if isinstance(file, (str, os.PathLike)):
             try:
-                return orig_open(
-                    _resolve_read(_normalize_runtime_path(file)),
-                    *args,
-                    **patched_kwargs,
-                )
+                return orig_open(_resolve_read(_normalize_runtime_path(file)), *args, **kwargs)
             except Exception:
-                return orig_open(_normalize_runtime_path(file), *args, **patched_kwargs)
-        return orig_open(file, *args, **patched_kwargs)
+                return orig_open(_normalize_runtime_path(file), *args, **kwargs)
+        return orig_open(file, *args, **kwargs)
 
     def _patched_pil_open(fp: Any, *args: Any, **kwargs: Any):
         if isinstance(fp, (str, os.PathLike)):
@@ -2317,6 +3158,8 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
 
     try:
         os.chdir(str(workspace))
+        os.environ["WORKSPACE"] = str(workspace)
+        os.environ["PROJECT_ROOT"] = str(_RUNTIME_PROJECT_ROOT)
         os.path.exists = _patched_exists
         builtins.open = _patched_open
         Image.open = _patched_pil_open
@@ -2346,6 +3189,14 @@ def _tool_run_python(workspace: Path, code: str, timeout: int = 30) -> ToolResul
             ok=False,
         )
     finally:
+        if prev_env_workspace is None:
+            os.environ.pop("WORKSPACE", None)
+        else:
+            os.environ["WORKSPACE"] = prev_env_workspace
+        if prev_env_project_root is None:
+            os.environ.pop("PROJECT_ROOT", None)
+        else:
+            os.environ["PROJECT_ROOT"] = prev_env_project_root
         os.path.exists = orig_exists
         builtins.open = orig_open
         Image.open = pil_open
@@ -2473,10 +3324,7 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
             "Search the PDF text layer; returns hit pages, snippets, and rect_pdf "
             "(bounding box in PDF points, origin top-left, y down). "
             "For queries matching TP+digits (e.g. TP1, TP105), substring false positives "
-            "are filtered: TP1 does not match the TP1 inside TP105. "
-            "To mark a hit visually without PNG coordinate math, use "
-            "pdf_draw_circle_then_rasterize with the same rect_pdf and page, then "
-            "view_image on the PNG."
+            "are filtered: TP1 does not match the TP1 inside TP105."
         ),
         parameters={
             "type": "object",
@@ -2520,17 +3368,6 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     ))
 
     reg.register(Tool(
-        name="image_info",
-        description="Return width, height, mode and size in bytes for an image file.",
-        parameters={
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": ["path"],
-        },
-        fn=_tool_image_info,
-    ))
-
-    reg.register(Tool(
         name="pdf_page_to_image",
         description=(
             "Render a single PDF page to PNG inside workspace. "
@@ -2571,67 +3408,182 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     ))
 
     reg.register(Tool(
-        name="pdf_draw_circle_then_rasterize",
+        name="mark_tp_on_assembly_from_pdf_hit",
         description=(
-            "Draw a green circle on one PDF page in PDF point coordinates (same space "
-            "as search_pdf_text rect_pdf / WPS Ctrl+F), then render that page to PNG. "
-            "Does not write the PDF file on disk—only exports the raster. "
-            "Prefer this over annotate_image on PNG to avoid dpi round-off. "
-            "With rect_pdf only, radius defaults to ~0.9× the hit box half-span (compact TP ring); "
-            "pass radius_pt to override. "
-            "Pass rect_pdf [x0,y0,x1,y1] from search hits, or center_pdf [cx,cy] with radius_pt."
+            "Use `debug/case10_target_tp_pdf_search.json` hit rect to locate TP on "
+            "`debug/case10_assembly_drawing.png`: crop ROI near target, detect circular pad "
+            "with OpenCV, then draw green circle back on full image."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "pdf_path": {"type": "string"},
-                "page": {"type": "integer", "default": 1},
-                "rect_pdf": {
-                    "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Optional [x0,y0,x1,y1] from search_pdf_text hit.",
+                "search_json_path": {"type": "string", "default": "debug/case10_target_tp_pdf_search.json"},
+                "assembly_png_path": {"type": "string", "default": "debug/case10_assembly_drawing.png"},
+                "assembly_pdf_path": {
+                    "type": "string",
+                    "description": "Optional; defaults to `pdf_path` in search JSON.",
                 },
-                "center_pdf": {
-                    "type": "array",
-                    "items": {"type": "number"},
-                    "description": "Optional [cx,cy] in PDF points if not using rect_pdf.",
-                },
-                "radius_pt": {
-                    "type": "number",
-                    "description": "Circle radius in PDF points; if omitted with rect_pdf, inferred from box.",
-                },
-                "min_radius_pt": {"type": "number", "default": 4.0},
-                "stroke_width_pt": {"type": "number", "default": 1.5},
-                "dpi": {"type": "integer", "default": 600},
-                "out_path": {"type": "string", "default": "debug/pdf_page_marked.png"},
-                "graphics_min_line_width": {
-                    "type": "number",
-                    "description": "Optional PyMuPDF min line width when rasterizing (see pdf_page_to_image).",
-                },
-                "aa_level": {
-                    "type": "integer",
-                    "description": "Optional anti-alias level 0–8 when rasterizing.",
+                "hit_index": {"type": "integer", "default": 0},
+                "roi_half": {"type": "integer", "default": 50},
+                "out_work_roi_path": {"type": "string", "default": "debug/case10_target_tp_work_roi.png"},
+                "out_marked_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
+            },
+            "required": [],
+        },
+        fn=lambda search_json_path="debug/case10_target_tp_pdf_search.json",
+            assembly_png_path="debug/case10_assembly_drawing.png",
+            assembly_pdf_path="",
+            hit_index=0,
+            roi_half=50,
+            out_work_roi_path="debug/case10_target_tp_work_roi.png",
+            out_marked_path="debug/case10_assembly_drawing_tp_marked.png":
+            _tool_mark_tp_on_assembly_from_pdf_hit(
+                workspace=workspace,
+                search_json_path=search_json_path,
+                assembly_png_path=assembly_png_path,
+                assembly_pdf_path=assembly_pdf_path,
+                hit_index=hit_index,
+                roi_half=roi_half,
+                out_work_roi_path=out_work_roi_path,
+                out_marked_path=out_marked_path,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="detect_largest_ic_on_assembly_from_vlm_hint",
+        description=(
+            "PartB deterministic assembly IC detection using legacy successful baseline "
+            "(THRESH_BINARY_INV=180, MORPH_RECT 3x3 dilate=1, min_area>=5000, aspect 0.5~1.5, "
+            "rank by max bbox area). Writes case10_assembly_opencv_debug/box/json."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "assembly_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
+                "hints_json_path": {"type": "string", "default": "debug/case10_assembly_vlm_hints.json"},
+                "work_margin_ratio": {"type": "number", "default": 0.2},
+                "out_debug_path": {"type": "string", "default": "debug/case10_assembly_opencv_debug.png"},
+                "out_box_path": {"type": "string", "default": "debug/case10_assembly_largest_ic_box.png"},
+                "out_json_path": {"type": "string", "default": "debug/case10_assembly_largest_ic.json"},
+            },
+            "required": [],
+        },
+        fn=lambda assembly_path="debug/case10_assembly_drawing_tp_marked.png",
+            hints_json_path="debug/case10_assembly_vlm_hints.json",
+            work_margin_ratio=0.2,
+            out_debug_path="debug/case10_assembly_opencv_debug.png",
+            out_box_path="debug/case10_assembly_largest_ic_box.png",
+            out_json_path="debug/case10_assembly_largest_ic.json":
+            _tool_detect_largest_ic_on_assembly_from_vlm_hint(
+                workspace=workspace,
+                assembly_path=assembly_path,
+                hints_json_path=hints_json_path,
+                work_margin_ratio=work_margin_ratio,
+                out_debug_path=out_debug_path,
+                out_box_path=out_box_path,
+                out_json_path=out_json_path,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="case12_build_and_align_from_step02_anchors",
+        description=(
+            "PartD dedicated tool. Input locator + board anchor images "
+            "(direct case10 largest-IC box images are supported), then run "
+            "`case12_step02_graph` official functions to generate locator graph and aligned board points."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "locator_anchor_path": {"type": "string", "default": "debug/case10_assembly_largest_ic_box.png"},
+                "board_anchor_path": {"type": "string", "default": "debug/case10_largest_ic_box.png"},
+            },
+            "required": [],
+        },
+        fn=lambda locator_anchor_path="debug/case10_assembly_largest_ic_box.png",
+            board_anchor_path="debug/case10_largest_ic_box.png":
+            _tool_case12_build_and_align_from_step02_anchors(
+                workspace=workspace,
+                locator_anchor_path=locator_anchor_path,
+                board_anchor_path=board_anchor_path,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="emit_step08_from_case12_aligned",
+        description=(
+            "PartD deterministic finalization. Read `case12_board_points_aligned.json` target point, "
+            "draw final TP marker on `step02_board_front_anchor.png`, write `step08_final_tp.png` + "
+            "`step08_result.json`, and set `step03_mapping.json.mapping_method` for finish contract."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "aligned_json_path": {"type": "string", "default": "debug/case12_board_points_aligned.json"},
+                "board_anchor_path": {"type": "string", "default": "debug/step02_board_front_anchor.png"},
+                "out_step08_png_path": {"type": "string", "default": "debug/step08_final_tp.png"},
+                "out_step08_json_path": {"type": "string", "default": "debug/step08_result.json"},
+                "out_mapping_json_path": {"type": "string", "default": "debug/step03_mapping.json"},
+                "mapping_method": {
+                    "type": "string",
+                    "description": "Optional override; normally inferred from aligned source (opencv/vlm case12).",
                 },
             },
-            "required": ["pdf_path"],
+            "required": [],
         },
-        fn=lambda pdf_path, page=1, rect_pdf=None, center_pdf=None, radius_pt=None,
-            min_radius_pt=4.0, stroke_width_pt=1.5, dpi=600,
-            out_path="debug/pdf_page_marked.png", graphics_min_line_width=None,
-            aa_level=None:
-            _tool_pdf_draw_circle_then_rasterize(
+        fn=lambda aligned_json_path="debug/case12_board_points_aligned.json",
+            board_anchor_path="debug/step02_board_front_anchor.png",
+            out_step08_png_path="debug/step08_final_tp.png",
+            out_step08_json_path="debug/step08_result.json",
+            out_mapping_json_path="debug/step03_mapping.json",
+            mapping_method=None:
+            _tool_emit_step08_from_case12_aligned(
                 workspace=workspace,
-                pdf_path=pdf_path,
-                page=page,
-                rect_pdf=rect_pdf,
-                center_pdf=center_pdf,
-                radius_pt=radius_pt,
-                min_radius_pt=min_radius_pt,
-                stroke_width_pt=stroke_width_pt,
-                dpi=dpi,
-                out_path=out_path,
-                graphics_min_line_width=graphics_min_line_width,
-                aa_level=aa_level,
+                aligned_json_path=aligned_json_path,
+                board_anchor_path=board_anchor_path,
+                out_step08_png_path=out_step08_png_path,
+                out_step08_json_path=out_step08_json_path,
+                out_mapping_json_path=out_mapping_json_path,
+                mapping_method=mapping_method,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="detect_largest_ic_on_board_from_vlm_hint",
+        description=(
+            "PartA deterministic board IC detection: read board image from "
+            "`INPUT_PATHS.front_board_photo` "
+            "+ board hints JSON (`case10_vlm_hints.json` preferred, `case10_board_vlm_hints.json` compatible), "
+            "expand work ROI, run a "
+            "stable OpenCV baseline, and write `case10_opencv_debug.png` + "
+            "`case10_largest_ic_box.png` + `case10_largest_ic.json`."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "board_path": {"type": "string", "default": "INPUT_PATHS.front_board_photo"},
+                "hints_json_path": {"type": "string", "default": "debug/case10_vlm_hints.json"},
+                "work_margin_ratio": {"type": "number", "default": 0.2},
+                "out_debug_path": {"type": "string", "default": "debug/case10_opencv_debug.png"},
+                "out_box_path": {"type": "string", "default": "debug/case10_largest_ic_box.png"},
+                "out_json_path": {"type": "string", "default": "debug/case10_largest_ic.json"},
+            },
+            "required": [],
+        },
+        fn=lambda board_path="INPUT_PATHS.front_board_photo",
+            hints_json_path="debug/case10_vlm_hints.json",
+            work_margin_ratio=0.2,
+            out_debug_path="debug/case10_opencv_debug.png",
+            out_box_path="debug/case10_largest_ic_box.png",
+            out_json_path="debug/case10_largest_ic.json":
+            _tool_detect_largest_ic_on_board_from_vlm_hint(
+                workspace=workspace,
+                board_path=board_path,
+                hints_json_path=hints_json_path,
+                work_margin_ratio=work_margin_ratio,
+                out_debug_path=out_debug_path,
+                out_box_path=out_box_path,
+                out_json_path=out_json_path,
             ),
     ))
 

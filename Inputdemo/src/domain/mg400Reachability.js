@@ -8,6 +8,9 @@ const JOINT_LIMITS = {
 };
 
 const WORKSPACE_BOUNDARY = [
+  [-250.0, 200.0, 360.0],   // 桌面以下 (Z≈-228), 实测 r≈330 可到达
+  [-100.0, 200.0, 380.0],   // 桌面以上过渡
+  [0.0, 205.0, 400.0],      // 基座平面
   [10.391, 229.49, 328.019],
   [18.604, 228.507, 351.188],
   [26.816, 227.117, 365.915],
@@ -22,8 +25,8 @@ const WORKSPACE_BOUNDARY = [
 ];
 
 const WORKSPACE_MARGIN_MM = 5;
-const LOW_Z_STALL_GUARD_MM = 85;
-const SAFE_HOVER_Z_MM = 95;
+const LOW_Z_STALL_GUARD_MM = -240;  // 桌面 Z≈-228, 保护阈值设在桌面下方
+const SAFE_HOVER_Z_MM = -200;       // 桌面上方 ~28mm 安全悬停高度
 
 function clamp(value, low, high) {
   return Math.min(high, Math.max(low, value));

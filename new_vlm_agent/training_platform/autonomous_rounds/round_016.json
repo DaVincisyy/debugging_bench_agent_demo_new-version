@@ -1,0 +1,883 @@
+{
+  "iteration": 16,
+  "apply_outcome": "reverted_not_session_best",
+  "good_sha_before": "82d2c7909c2205f504c59e6f2cbd0d6c823a32ed",
+  "good_sha_after": "82d2c7909c2205f504c59e6f2cbd0d6c823a32ed",
+  "primary_run": {
+    "run_id": "20260609-004303-task",
+    "part_timing": {
+      "part0_s": 64.2088,
+      "partb_s": 155.6252,
+      "parta_s": 41.0023,
+      "partc_s": 0.0,
+      "partd_s": 56.8258,
+      "unknown_s": 16.9403,
+      "total_s": 334.6024
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 495366,
+        "completion_tokens": 11709,
+        "total_tokens": 507075,
+        "reasoning_tokens": 8171
+      },
+      "reflection": {
+        "prompt_tokens": 6845,
+        "completion_tokens": 4546,
+        "total_tokens": 11391,
+        "reasoning_tokens": 3449
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 3004,
+        "completion_tokens": 3035,
+        "total_tokens": 6039,
+        "reasoning_tokens": 2508
+      },
+      "combined": {
+        "prompt_tokens": 505215,
+        "completion_tokens": 19290,
+        "total_tokens": 524505,
+        "reasoning_tokens": 5957
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 16.9403,
+        "llm_s": 16.876,
+        "tools_s": 0.0045,
+        "images_attach_s": 0.0145,
+        "llm_est_prefill_s": 3.6972,
+        "llm_est_decode_s": 13.1778,
+        "prompt_tokens": 45209,
+        "completion_tokens": 593,
+        "total_tokens": 45802
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 19.6629,
+        "llm_s": 19.5929,
+        "tools_s": 0.0085,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.1485,
+        "llm_est_decode_s": 18.4444,
+        "prompt_tokens": 48051,
+        "completion_tokens": 830,
+        "total_tokens": 48881
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 9.1237,
+        "llm_s": 7.386,
+        "tools_s": 1.6814,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 4.2083,
+        "llm_est_decode_s": 3.1778,
+        "prompt_tokens": 48656,
+        "completion_tokens": 143,
+        "total_tokens": 48799
+      },
+      {
+        "step": 3,
+        "tools": [
+          "run_python"
+        ],
+        "step_total_s": 13.1664,
+        "llm_s": 13.1043,
+        "tools_s": 0.0062,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.8376,
+        "llm_est_decode_s": 10.2667,
+        "prompt_tokens": 48875,
+        "completion_tokens": 462,
+        "total_tokens": 49337
+      },
+      {
+        "step": 4,
+        "tools": [
+          "read_text_file"
+        ],
+        "step_total_s": 6.7816,
+        "llm_s": 6.7091,
+        "tools_s": 0.001,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 5.0425,
+        "llm_est_decode_s": 1.6667,
+        "prompt_tokens": 49134,
+        "completion_tokens": 75,
+        "total_tokens": 49209
+      },
+      {
+        "step": 5,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 10.4069,
+        "llm_s": 10.0073,
+        "tools_s": 0.333,
+        "images_attach_s": 0.0073,
+        "llm_est_prefill_s": 4.9184,
+        "llm_est_decode_s": 5.0889,
+        "prompt_tokens": 49242,
+        "completion_tokens": 229,
+        "total_tokens": 49471
+      },
+      {
+        "step": 6,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 5.0673,
+        "llm_s": 5.0306,
+        "tools_s": 0.0054,
+        "images_attach_s": 0.0111,
+        "llm_est_prefill_s": 1.0751,
+        "llm_est_decode_s": 3.9556,
+        "prompt_tokens": 6856,
+        "completion_tokens": 178,
+        "total_tokens": 7034
+      },
+      {
+        "step": 7,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 15.9107,
+        "llm_s": 15.8805,
+        "tools_s": 0.0079,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.636,
+        "llm_est_decode_s": 14.2444,
+        "prompt_tokens": 9600,
+        "completion_tokens": 641,
+        "total_tokens": 10241
+      },
+      {
+        "step": 8,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 19.6332,
+        "llm_s": 19.1749,
+        "tools_s": 0.41,
+        "images_attach_s": 0.0229,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 19.1749,
+        "prompt_tokens": 9812,
+        "completion_tokens": 876,
+        "total_tokens": 10688
+      },
+      {
+        "step": 9,
+        "tools": [],
+        "step_total_s": 5.7986,
+        "llm_s": 5.7809,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.1365,
+        "llm_est_decode_s": 4.6444,
+        "prompt_tokens": 6903,
+        "completion_tokens": 209,
+        "total_tokens": 7112
+      },
+      {
+        "step": 10,
+        "tools": [],
+        "step_total_s": 6.6949,
+        "llm_s": 6.6918,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.3575,
+        "llm_est_decode_s": 5.3333,
+        "prompt_tokens": 7023,
+        "completion_tokens": 240,
+        "total_tokens": 7263
+      },
+      {
+        "step": 11,
+        "tools": [],
+        "step_total_s": 7.1078,
+        "llm_s": 7.1034,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.8367,
+        "llm_est_decode_s": 5.2667,
+        "prompt_tokens": 7143,
+        "completion_tokens": 237,
+        "total_tokens": 7380
+      },
+      {
+        "step": 12,
+        "tools": [],
+        "step_total_s": 6.2796,
+        "llm_s": 6.2754,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.0309,
+        "llm_est_decode_s": 4.2444,
+        "prompt_tokens": 7263,
+        "completion_tokens": 191,
+        "total_tokens": 7454
+      },
+      {
+        "step": 13,
+        "tools": [],
+        "step_total_s": 7.5582,
+        "llm_s": 7.5551,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.4874,
+        "llm_est_decode_s": 5.0667,
+        "prompt_tokens": 7383,
+        "completion_tokens": 228,
+        "total_tokens": 7611
+      },
+      {
+        "step": 14,
+        "tools": [],
+        "step_total_s": 6.9691,
+        "llm_s": 6.9646,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.9646,
+        "llm_est_decode_s": 6.0,
+        "prompt_tokens": 7503,
+        "completion_tokens": 270,
+        "total_tokens": 7773
+      },
+      {
+        "step": 15,
+        "tools": [],
+        "step_total_s": 8.1005,
+        "llm_s": 8.0973,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.1862,
+        "llm_est_decode_s": 7.9111,
+        "prompt_tokens": 7623,
+        "completion_tokens": 356,
+        "total_tokens": 7979
+      },
+      {
+        "step": 16,
+        "tools": [],
+        "step_total_s": 5.2909,
+        "llm_s": 5.2868,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.5312,
+        "llm_est_decode_s": 3.7556,
+        "prompt_tokens": 7744,
+        "completion_tokens": 169,
+        "total_tokens": 7913
+      },
+      {
+        "step": 17,
+        "tools": [],
+        "step_total_s": 24.6218,
+        "llm_s": 24.6183,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 24.6173,
+        "prompt_tokens": 7865,
+        "completion_tokens": 1262,
+        "total_tokens": 9127
+      },
+      {
+        "step": 18,
+        "tools": [],
+        "step_total_s": 7.1041,
+        "llm_s": 7.0997,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.033,
+        "llm_est_decode_s": 6.0667,
+        "prompt_tokens": 7163,
+        "completion_tokens": 273,
+        "total_tokens": 7436
+      },
+      {
+        "step": 19,
+        "tools": [],
+        "step_total_s": 6.9161,
+        "llm_s": 6.9124,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.8901,
+        "llm_est_decode_s": 6.0222,
+        "prompt_tokens": 7164,
+        "completion_tokens": 271,
+        "total_tokens": 7435
+      },
+      {
+        "step": 20,
+        "tools": [],
+        "step_total_s": 5.9319,
+        "llm_s": 5.9288,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 0.9278,
+        "llm_est_decode_s": 5.0,
+        "prompt_tokens": 7165,
+        "completion_tokens": 225,
+        "total_tokens": 7390
+      },
+      {
+        "step": 21,
+        "tools": [],
+        "step_total_s": 6.2654,
+        "llm_s": 6.2609,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.0165,
+        "llm_est_decode_s": 5.2444,
+        "prompt_tokens": 7166,
+        "completion_tokens": 236,
+        "total_tokens": 7402
+      },
+      {
+        "step": 22,
+        "tools": [],
+        "step_total_s": 5.1325,
+        "llm_s": 5.1293,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.0627,
+        "llm_est_decode_s": 4.0667,
+        "prompt_tokens": 7167,
+        "completion_tokens": 183,
+        "total_tokens": 7350
+      },
+      {
+        "step": 23,
+        "tools": [],
+        "step_total_s": 5.2569,
+        "llm_s": 5.2526,
+        "tools_s": 0.0,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.097,
+        "llm_est_decode_s": 4.1556,
+        "prompt_tokens": 7168,
+        "completion_tokens": 187,
+        "total_tokens": 7355
+      },
+      {
+        "step": 24,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 5.053,
+        "llm_s": 5.0273,
+        "tools_s": 0.0031,
+        "images_attach_s": 0.0178,
+        "llm_est_prefill_s": 0.3829,
+        "llm_est_decode_s": 4.6444,
+        "prompt_tokens": 7168,
+        "completion_tokens": 209,
+        "total_tokens": 7377
+      },
+      {
+        "step": 25,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 12.989,
+        "llm_s": 12.9459,
+        "tools_s": 0.0025,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.4792,
+        "llm_est_decode_s": 9.4667,
+        "prompt_tokens": 9659,
+        "completion_tokens": 426,
+        "total_tokens": 10085
+      },
+      {
+        "step": 26,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 14.3132,
+        "llm_s": 14.2653,
+        "tools_s": 0.0084,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 2.1987,
+        "llm_est_decode_s": 12.0667,
+        "prompt_tokens": 9793,
+        "completion_tokens": 543,
+        "total_tokens": 10336
+      },
+      {
+        "step": 27,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 13.7001,
+        "llm_s": 12.3397,
+        "tools_s": 1.1777,
+        "images_attach_s": 0.1458,
+        "llm_est_prefill_s": 3.0286,
+        "llm_est_decode_s": 9.3111,
+        "prompt_tokens": 9982,
+        "completion_tokens": 419,
+        "total_tokens": 10401
+      },
+      {
+        "step": 28,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 20.2662,
+        "llm_s": 18.1833,
+        "tools_s": 1.9643,
+        "images_attach_s": 0.0989,
+        "llm_est_prefill_s": 0.0,
+        "llm_est_decode_s": 18.1822,
+        "prompt_tokens": 6853,
+        "completion_tokens": 907,
+        "total_tokens": 7760
+      },
+      {
+        "step": 29,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 17.5505,
+        "llm_s": 15.5652,
+        "tools_s": 1.7157,
+        "images_attach_s": 0.0494,
+        "llm_est_prefill_s": 6.8976,
+        "llm_est_decode_s": 8.6667,
+        "prompt_tokens": 12234,
+        "completion_tokens": 390,
+        "total_tokens": 12624
+      },
+      {
+        "step": 30,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 19.0091,
+        "llm_s": 18.6267,
+        "tools_s": 0.0061,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 13.0489,
+        "llm_est_decode_s": 5.5778,
+        "prompt_tokens": 14799,
+        "completion_tokens": 251,
+        "total_tokens": 15050
+      }
+    ],
+    "planned_improvements": [
+      {
+        "id": "A1",
+        "priority": "P0",
+        "category": "流程编排",
+        "title": "PartB阶段纯推理步数限制与视觉工具强制注入",
+        "target_files": [
+          "agent/loop_controller.py"
+        ],
+        "concrete_steps": [
+          "在 agent/loop_controller.py 的 step 循环逻辑中新增 pure_llm_step_counter 状态变量",
+          "当 part == 'partb' 且当前 step tools 为空时计数器加 1，达到 5 时自动在 system prompt 注入强制指令：'必须立即调用 view_image 或 detect_largest_ic_on_assembly_from_vlm_hint'",
+          "触发强制指令后重置计数器，并调用 clear_irrelevant_history() 仅保留最近 3 步对话上下文"
+        ],
+        "risk": "low"
+      },
+      {
+        "id": "A2",
+        "priority": "P0",
+        "category": "prompt体积",
+        "title": "Phase Handoff 上下文动态裁剪与冗余数据剥离",
+        "target_files": [
+          "agent/context_manager.py"
+        ],
+        "concrete_steps": [
+          "在 agent/context_manager.py 的 build_handoff_artifacts 函数中增加过滤逻辑，移除所有 base64 图像数据与长度超 2000 字符的中间 JSON 日志",
+          "将历史 artifacts 替换为仅包含 file_path、关键坐标摘要(x,y,w,h)与 confidence 的结构化短文本",
+          "在 partd 阶段初始化前执行 truncate_context_to_last_n_steps(n=4)，确保 prompt tokens 严格控制在 8000 以内"
+        ],
+        "risk": "low"
+      }
+    ]
+  },
+  "verify_run": {
+    "run_id": "20260609-005428-task",
+    "part_timing": {
+      "part0_s": 67.7591,
+      "partb_s": 38.1301,
+      "parta_s": 50.0512,
+      "partc_s": 0.0,
+      "partd_s": 42.9782,
+      "unknown_s": 16.6442,
+      "total_s": 215.5628
+    },
+    "stopped_reason": "finish-tool-called",
+    "finish_pixel": [
+      2037,
+      1114
+    ],
+    "golden_pixel": [
+      2038,
+      1114
+    ],
+    "pixel_comparison": {
+      "status": "ok",
+      "golden_pixel": [
+        2038,
+        1114
+      ],
+      "actual_pixel": [
+        2037,
+        1114
+      ],
+      "dx": -1,
+      "dy": 0,
+      "distance_px": 1.0,
+      "within_tolerance": true,
+      "tolerance_px": 10
+    },
+    "qwen_tokens": {
+      "agent_main_loop": {
+        "prompt_tokens": 337299,
+        "completion_tokens": 6951,
+        "total_tokens": 344250,
+        "reasoning_tokens": 4953
+      },
+      "reflection": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "apply_plan_generation": {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0
+      },
+      "combined": {
+        "prompt_tokens": 337299,
+        "completion_tokens": 6951,
+        "total_tokens": 344250
+      }
+    },
+    "step_details": [
+      {
+        "step": 0,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 16.6442,
+        "llm_s": 16.5603,
+        "tools_s": 0.0042,
+        "images_attach_s": 0.0157,
+        "llm_est_prefill_s": 2.6704,
+        "llm_est_decode_s": 13.8889,
+        "prompt_tokens": 45209,
+        "completion_tokens": 625,
+        "total_tokens": 45834
+      },
+      {
+        "step": 1,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 13.4179,
+        "llm_s": 13.3429,
+        "tools_s": 0.0086,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 3.6984,
+        "llm_est_decode_s": 9.6444,
+        "prompt_tokens": 48040,
+        "completion_tokens": 434,
+        "total_tokens": 48474
+      },
+      {
+        "step": 2,
+        "tools": [
+          "search_pdf_text"
+        ],
+        "step_total_s": 11.1001,
+        "llm_s": 9.1279,
+        "tools_s": 1.907,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 5.7057,
+        "llm_est_decode_s": 3.4222,
+        "prompt_tokens": 48477,
+        "completion_tokens": 154,
+        "total_tokens": 48631
+      },
+      {
+        "step": 3,
+        "tools": [
+          "read_text_file"
+        ],
+        "step_total_s": 11.5706,
+        "llm_s": 11.4818,
+        "tools_s": 0.002,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 6.3919,
+        "llm_est_decode_s": 5.0889,
+        "prompt_tokens": 48696,
+        "completion_tokens": 229,
+        "total_tokens": 48925
+      },
+      {
+        "step": 4,
+        "tools": [
+          "mark_tp_on_assembly_from_pdf_hit"
+        ],
+        "step_total_s": 23.0272,
+        "llm_s": 22.6322,
+        "tools_s": 0.3278,
+        "images_attach_s": 0.0061,
+        "llm_est_prefill_s": 3.9433,
+        "llm_est_decode_s": 18.6889,
+        "prompt_tokens": 48804,
+        "completion_tokens": 841,
+        "total_tokens": 49645
+      },
+      {
+        "step": 5,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 8.6433,
+        "llm_s": 8.6083,
+        "tools_s": 0.0056,
+        "images_attach_s": 0.0118,
+        "llm_est_prefill_s": 0.8972,
+        "llm_est_decode_s": 7.7111,
+        "prompt_tokens": 6930,
+        "completion_tokens": 347,
+        "total_tokens": 7277
+      },
+      {
+        "step": 6,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 15.6997,
+        "llm_s": 15.6708,
+        "tools_s": 0.0066,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.2485,
+        "llm_est_decode_s": 14.4222,
+        "prompt_tokens": 9683,
+        "completion_tokens": 649,
+        "total_tokens": 10332
+      },
+      {
+        "step": 7,
+        "tools": [
+          "detect_largest_ic_on_assembly_from_vlm_hint"
+        ],
+        "step_total_s": 9.9907,
+        "llm_s": 9.3011,
+        "tools_s": 0.648,
+        "images_attach_s": 0.0106,
+        "llm_est_prefill_s": 2.79,
+        "llm_est_decode_s": 6.5111,
+        "prompt_tokens": 9900,
+        "completion_tokens": 293,
+        "total_tokens": 10193
+      },
+      {
+        "step": 8,
+        "tools": [
+          "view_image"
+        ],
+        "step_total_s": 12.4397,
+        "llm_s": 12.392,
+        "tools_s": 0.0035,
+        "images_attach_s": 0.0199,
+        "llm_est_prefill_s": 1.5031,
+        "llm_est_decode_s": 10.8889,
+        "prompt_tokens": 7028,
+        "completion_tokens": 490,
+        "total_tokens": 7518
+      },
+      {
+        "step": 9,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 20.1483,
+        "llm_s": 20.1165,
+        "tools_s": 0.0021,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 1.1165,
+        "llm_est_decode_s": 19.0,
+        "prompt_tokens": 9758,
+        "completion_tokens": 855,
+        "total_tokens": 10613
+      },
+      {
+        "step": 10,
+        "tools": [
+          "save_text_file"
+        ],
+        "step_total_s": 20.4078,
+        "llm_s": 20.3751,
+        "tools_s": 0.01,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 5.4195,
+        "llm_est_decode_s": 14.9556,
+        "prompt_tokens": 10010,
+        "completion_tokens": 673,
+        "total_tokens": 10683
+      },
+      {
+        "step": 11,
+        "tools": [
+          "detect_largest_ic_on_board_from_vlm_hint"
+        ],
+        "step_total_s": 9.4951,
+        "llm_s": 8.3638,
+        "tools_s": 0.9818,
+        "images_attach_s": 0.1263,
+        "llm_est_prefill_s": 2.2305,
+        "llm_est_decode_s": 6.1333,
+        "prompt_tokens": 10347,
+        "completion_tokens": 276,
+        "total_tokens": 10623
+      },
+      {
+        "step": 12,
+        "tools": [
+          "case12_build_and_align_from_step02_anchors"
+        ],
+        "step_total_s": 7.4602,
+        "llm_s": 5.2908,
+        "tools_s": 2.0681,
+        "images_attach_s": 0.0782,
+        "llm_est_prefill_s": 0.8464,
+        "llm_est_decode_s": 4.4444,
+        "prompt_tokens": 7029,
+        "completion_tokens": 200,
+        "total_tokens": 7229
+      },
+      {
+        "step": 13,
+        "tools": [
+          "emit_step08_from_case12_aligned"
+        ],
+        "step_total_s": 21.0077,
+        "llm_s": 19.1683,
+        "tools_s": 1.5716,
+        "images_attach_s": 0.0505,
+        "llm_est_prefill_s": 6.5905,
+        "llm_est_decode_s": 12.5778,
+        "prompt_tokens": 12411,
+        "completion_tokens": 566,
+        "total_tokens": 12977
+      },
+      {
+        "step": 14,
+        "tools": [
+          "finish"
+        ],
+        "step_total_s": 14.5103,
+        "llm_s": 14.1142,
+        "tools_s": 0.0143,
+        "images_attach_s": 0.0,
+        "llm_est_prefill_s": 7.0242,
+        "llm_est_decode_s": 7.0889,
+        "prompt_tokens": 14977,
+        "completion_tokens": 319,
+        "total_tokens": 15296
+      }
+    ],
+    "planned_improvements": []
+  },
+  "improvements_applied": [
+    {
+      "id": "A1",
+      "priority": "P0",
+      "category": "流程编排",
+      "title": "PartB阶段纯推理步数限制与视觉工具强制注入",
+      "target_files": [
+        "agent/loop_controller.py"
+      ],
+      "concrete_steps": [
+        "在 agent/loop_controller.py 的 step 循环逻辑中新增 pure_llm_step_counter 状态变量",
+        "当 part == 'partb' 且当前 step tools 为空时计数器加 1，达到 5 时自动在 system prompt 注入强制指令：'必须立即调用 view_image 或 detect_largest_ic_on_assembly_from_vlm_hint'",
+        "触发强制指令后重置计数器，并调用 clear_irrelevant_history() 仅保留最近 3 步对话上下文"
+      ],
+      "risk": "low"
+    },
+    {
+      "id": "A2",
+      "priority": "P0",
+      "category": "prompt体积",
+      "title": "Phase Handoff 上下文动态裁剪与冗余数据剥离",
+      "target_files": [
+        "agent/context_manager.py"
+      ],
+      "concrete_steps": [
+        "在 agent/context_manager.py 的 build_handoff_artifacts 函数中增加过滤逻辑，移除所有 base64 图像数据与长度超 2000 字符的中间 JSON 日志",
+        "将历史 artifacts 替换为仅包含 file_path、关键坐标摘要(x,y,w,h)与 confidence 的结构化短文本",
+        "在 partd 阶段初始化前执行 truncate_context_to_last_n_steps(n=4)，确保 prompt tokens 严格控制在 8000 以内"
+      ],
+      "risk": "low"
+    }
+  ],
+  "cursor_apply": {
+    "status": "ok",
+    "model": "composer-2.5",
+    "elapsed_s": 207.65,
+    "usage": {}
+  },
+  "token_summary": {
+    "qwen_primary_run": {
+      "prompt_tokens": 505215,
+      "completion_tokens": 19290,
+      "total_tokens": 524505,
+      "reasoning_tokens": 5957
+    },
+    "qwen_verify_run": {
+      "prompt_tokens": 337299,
+      "completion_tokens": 6951,
+      "total_tokens": 344250
+    },
+    "qwen_iteration_total": {
+      "prompt_tokens": 842514,
+      "completion_tokens": 26241,
+      "total_tokens": 868755
+    },
+    "cursor_apply": {}
+  }
+}
