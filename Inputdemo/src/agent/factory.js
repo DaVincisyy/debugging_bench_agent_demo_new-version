@@ -5,21 +5,19 @@ import { MockEquipmentController } from "../adapters/mockEquipmentController.js"
 import { ReportGenerator } from "../adapters/reportGenerator.js";
 import { VlmAgentCaseAdapter } from "../adapters/vlmAgentCaseAdapter.js";
 import { RealVlmAgentClient, RealVlmAgentModelClient } from "../adapters/realVlmAgentClient.js";
-import { RealVlmAgentRunner } from "../adapters/realVlmAgentRunner.js";
 import { VlmAgentServiceRunner } from "../adapters/vlmAgentServiceRunner.js";
 import { RemoteVlmAgentServiceRunner } from "../adapters/remoteVlmAgentServiceRunner.js";
 
 /**
  * Decide which VLM runner to use based on environment:
  *
- *   VLM_AGENT_RUNNER=cli        → local CLI spawn (RealVlmAgentRunner)
- *   VLM_AGENT_RUNNER=local-svc  → local FastAPI service (VlmAgentServiceRunner + CLI fallback)
+ *   VLM_AGENT_RUNNER=local-svc  → local FastAPI service (VlmAgentServiceRunner)
  *   VLM_AGENT_RUNNER=remote-svc → remote FastAPI service (RemoteVlmAgentServiceRunner)
  *
  *   (default / unset)
  *   ─ If VLM_AGENT_SERVICE_URL points to a non-localhost address
  *     → RemoteVlmAgentServiceRunner (remote server)
- *   ─ Else → VlmAgentServiceRunner with CLI fallback (local dev)
+ *   ─ Else → VlmAgentServiceRunner (local dev service)
  */
 export function createDefaultAgent({ vlmRunner } = {}) {
   const runnerMode = process.env.VLM_AGENT_RUNNER || "";
@@ -27,14 +25,9 @@ export function createDefaultAgent({ vlmRunner } = {}) {
   let realVlmRunner = vlmRunner;
 
   if (!realVlmRunner) {
-    if (runnerMode === "cli") {
-      // Force local CLI (spawns python process)
-      realVlmRunner = new RealVlmAgentRunner();
-    } else if (runnerMode === "local-svc") {
-      // Force local service + CLI fallback
-      realVlmRunner = new VlmAgentServiceRunner({
-        fallbackRunner: new RealVlmAgentRunner(),
-      });
+    if (runnerMode === "cli" || runnerMode === "local-svc") {
+      // Force local service. CLI fallback is intentionally disabled.
+      realVlmRunner = new VlmAgentServiceRunner();
     } else if (runnerMode === "remote-svc") {
       // Force remote service (no fallback)
       realVlmRunner = new RemoteVlmAgentServiceRunner();
@@ -44,9 +37,7 @@ export function createDefaultAgent({ vlmRunner } = {}) {
       if (serviceUrl && !isLocalhostUrl(serviceUrl)) {
         realVlmRunner = new RemoteVlmAgentServiceRunner();
       } else {
-        realVlmRunner = new VlmAgentServiceRunner({
-          fallbackRunner: new RealVlmAgentRunner(),
-        });
+        realVlmRunner = new VlmAgentServiceRunner();
       }
     }
   }

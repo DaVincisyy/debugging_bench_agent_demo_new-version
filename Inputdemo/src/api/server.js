@@ -1,7 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
 import path from "node:path";
-import { createDefaultAgent } from "../agent/factory.js";
 import { mapVlmTargetToExecution } from "../agent/vlmTargetExecutionMapper.js";
 import { parseUserCommand } from "../agent/inputCore.js";
 import { createBenchRun, transition } from "../domain/run.js";
@@ -14,7 +13,6 @@ import { readMg400Config, writeMg400Config } from "../adapters/mg400Config.js";
 import { VlmAgentCaseAdapter } from "../adapters/vlmAgentCaseAdapter.js";
 import { VlmAgentServiceRunner } from "../adapters/vlmAgentServiceRunner.js";
 import { RemoteVlmAgentServiceRunner } from "../adapters/remoteVlmAgentServiceRunner.js";
-import { RealVlmAgentRunner } from "../adapters/realVlmAgentRunner.js";
 import { MockEquipmentController } from "../adapters/mockEquipmentController.js";
 import { ReportGenerator } from "../adapters/reportGenerator.js";
 import { getEthernetInfo, autoDetectAdapter } from "../adapters/ethernetConfig.js";
@@ -22,21 +20,19 @@ import { defaultVlmAgentRunsDir } from "../adapters/defaultPaths.js";
 import { VlmStatusMonitor } from "./vlmStatus.js";
 
 const port = Number(process.env.PORT || 3000);
-const cliFallbackRunner = new RealVlmAgentRunner();
-const agent = createDefaultAgent({ vlmRunner: cliFallbackRunner });
 
 // Decide runner mode based on VLM_AGENT_RUNNER env var:
 //   "cli"        → no service runner (use CLI fallback directly)
 //   "remote-svc" → RemoteVlmAgentServiceRunner (upload to remote server)
 //   (default)    → VlmAgentServiceRunner (local FastAPI + CLI fallback)
 const runnerMode = (process.env.VLM_AGENT_RUNNER || "").trim();
-let serviceRunner = null;
-if (runnerMode === "remote-svc") {
+let serviceRunner;
+if (runnerMode === "remote-svc" || shouldUseRemoteVlmService(process.env.VLM_AGENT_SERVICE_URL)) {
   serviceRunner = new RemoteVlmAgentServiceRunner();
-} else if (runnerMode !== "cli") {
-  serviceRunner = new VlmAgentServiceRunner({ fallbackRunner: cliFallbackRunner });
+} else {
+  serviceRunner = new VlmAgentServiceRunner();
 }
-const serviceCaseAdapter = serviceRunner ? new VlmAgentCaseAdapter() : null;
+const serviceCaseAdapter = new VlmAgentCaseAdapter();
 const robotGateway = new RobotGatewayClient();
 const serviceArmController = robotGateway;
 const serviceEquipmentController = new MockEquipmentController();
@@ -67,20 +63,8 @@ async function route(request, response) {
   if (request.method === "POST" && url.pathname === "/api/runs") {
     const payload = await readJsonBody(request);
     const input = parseUserCommand(payload);
-    if (serviceRunner) {
-      try {
-        const run = await startServiceBackedRun(input);
-        sendJson(response, 202, run);
-      } catch (error) {
-        if (!isServiceUnavailable(error)) throw error;
-        const run = await startCliFallbackRun(input, error);
-        sendJson(response, 201, run);
-      }
-      return;
-    }
-    const run = await agent.run(input);
-    saveRun(run);
-    sendJson(response, 201, run);
+    const run = await startServiceBackedRun(input);
+    sendJson(response, 202, run);
     return;
   }
 
@@ -271,20 +255,6 @@ async function startServiceBackedRun(input) {
       vlmStatus.markRunFailed(run.runId, error);
     }
   });
-  return run;
-}
-
-async function startCliFallbackRun(input, serviceError) {
-  const run = await agent.run(input);
-  run.serviceMode = false;
-  run.vlmServiceFallback = {
-    attempted: true,
-    serviceUrl: serviceRunner?.baseUrl || null,
-    reason: serviceError.message,
-    details: serviceError.details || null
-  };
-  saveRun(run);
-  appendRunEvent(run.runId, "node.vlm_service_fallback", run.vlmServiceFallback);
   return run;
 }
 
@@ -618,14 +588,14 @@ function sanitizeSegment(value) {
     .slice(0, 120);
 }
 
-function isServiceUnavailable(error) {
-  const category = error.details?.category;
-  if (category === "vlm-agent-service-unavailable") return true;
-  return /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|network/i.test([
-    error.message,
-    error.cause?.message,
-    error.cause?.code
-  ].filter(Boolean).join("\n"));
+function shouldUseRemoteVlmService(serviceUrl) {
+  if (!serviceUrl) return false;
+  try {
+    const hostname = new URL(serviceUrl).hostname.toLowerCase();
+    return !["localhost", "127.0.0.1", "::1", "0.0.0.0"].includes(hostname);
+  } catch {
+    return false;
+  }
 }
 
 async function sendRunEvents(request, response, runId, since) {

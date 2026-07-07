@@ -72,7 +72,7 @@ Useful runtime overrides:
 - `VLM_ENV_FILE` - path to the `.env` file used by the VLM agent.
 - `VLM_AGENT_MAX_STEPS` - maximum agent tool-use steps.
 - `VLM_AGENT_TIMEOUT_MS` - timeout used by the Node service while waiting for the VLM agent.
-- `VLM_AGENT_RUNNER=cli` - force the Node service to use the CLI fallback runner.
+- `VLM_AGENT_RUNNER=remote-svc` - force the Node service to use the server-hosted VLM service.
 
 ## Run The Web/API Service
 

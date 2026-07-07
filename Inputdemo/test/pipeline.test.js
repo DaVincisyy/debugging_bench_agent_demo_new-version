@@ -392,30 +392,9 @@ test("VLM agent service runner calls the Python service protocol and reads summa
   }
 });
 
-test("VLM agent service runner falls back to the CLI runner when the service is unavailable", async () => {
-  const fallbackCalls = [];
-  const fallbackRunner = {
-    run(payload) {
-      fallbackCalls.push(payload);
-      return Promise.resolve({
-        ok: true,
-        model: "cli-fallback",
-        agentDir: "Debugging-agent-v2",
-        workspace: "workspace",
-        runDir: "workspace/runs/fallback",
-        summaryPath: "workspace/runs/fallback/summary.json",
-        precheck: { ok: true },
-        attempts: [],
-        summary: { final_answer: { tp_id: "TP12", pixel: [11, 22] } },
-        finalAnswer: { tp_id: "TP12", pixel: [11, 22] },
-        pixel: [11, 22]
-      });
-    }
-  };
-
+test("VLM agent service runner reports service errors without CLI fallback", async () => {
   const runner = new VlmAgentServiceRunner({
     baseUrl: "http://127.0.0.1:1",
-    fallbackRunner,
     timeoutMs: 100,
     pollIntervalMs: 1
   });
@@ -427,14 +406,10 @@ test("VLM agent service runner falls back to the CLI runner when the service is 
     }
   };
 
-  const result = await runner.run(payload);
-
-  assert.equal(result.ok, true);
-  assert.equal(result.model, "cli-fallback");
-  assert.equal(result.serviceFallback.attempted, true);
-  assert.equal(result.serviceFallback.serviceUrl, "http://127.0.0.1:1");
-  assert.equal(fallbackCalls.length, 1);
-  assert.deepEqual(fallbackCalls[0], payload);
+  await assert.rejects(
+    () => runner.run(payload),
+    (error) => error.details?.category === "vlm-agent-service-unavailable"
+  );
 });
 
 test("real VLM model client derives temporary MG400 pose from pixel when pose is missing", async () => {

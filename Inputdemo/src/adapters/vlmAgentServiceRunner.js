@@ -11,8 +11,7 @@ export class VlmAgentServiceRunner {
     runsRoot = defaultVlmAgentRunsDir(),
     maxSteps = Number(process.env.VLM_AGENT_MAX_STEPS || 80),
     timeoutMs = Number(process.env.VLM_AGENT_TIMEOUT_MS || 60 * 60 * 1000),
-    pollIntervalMs = Number(process.env.VLM_AGENT_SERVICE_POLL_INTERVAL_MS || 1000),
-    fallbackRunner = null
+    pollIntervalMs = Number(process.env.VLM_AGENT_SERVICE_POLL_INTERVAL_MS || 1000)
   } = {}) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.envFile = envFile;
@@ -20,25 +19,10 @@ export class VlmAgentServiceRunner {
     this.maxSteps = maxSteps;
     this.timeoutMs = timeoutMs;
     this.pollIntervalMs = pollIntervalMs;
-    this.fallbackRunner = fallbackRunner;
   }
 
   async run({ input, vlmAgentCase }) {
-    try {
-      return await this.runOnce({ input, vlmAgentCase });
-    } catch (error) {
-      if (!this.fallbackRunner || !isServiceUnavailable(error)) throw error;
-      const fallbackResult = await this.fallbackRunner.run({ input, vlmAgentCase });
-      return {
-        ...fallbackResult,
-        serviceFallback: {
-          attempted: true,
-          serviceUrl: this.baseUrl,
-          reason: error.message,
-          details: error.details || null
-        }
-      };
-    }
+    return this.runOnce({ input, vlmAgentCase });
   }
 
   async health() {
@@ -194,7 +178,7 @@ async function requestServiceJson(url, options, action, serviceUrl) {
     const error = new Error(`Failed to ${action}: ${cause.message}`);
     error.details = {
       category: "vlm-agent-service-unavailable",
-      action: "Start Vlm agent/Debugging-agent-v2/agent/service.py with uvicorn, or allow Inputdemo to use the CLI fallback.",
+      action: "Start the VLM agent service or set VLM_AGENT_SERVICE_URL to the server-hosted service.",
       serviceUrl,
       cause: cause.message,
       code: cause.code || cause.cause?.code || null
@@ -222,16 +206,6 @@ async function readServiceJson(response, action) {
     throw error;
   }
   return body;
-}
-
-function isServiceUnavailable(error) {
-  const category = error.details?.category;
-  if (category === "vlm-agent-service-unavailable") return true;
-  return /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|network/i.test([
-    error.message,
-    error.cause?.message,
-    error.cause?.code
-  ].filter(Boolean).join("\n"));
 }
 
 function sleep(ms) {
