@@ -31,10 +31,10 @@ from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from .tools import Tool, ToolRegistry, ToolResult
-from .utils import truncate
+from .utils import pdf_raster_max_pixels, truncate, write_debug_image
 
 
 # --------------------------------------------------------------------------- #
@@ -977,7 +977,7 @@ def _tool_mark_tp_on_assembly_from_pdf_hit(
         step0c_path = "pdf_center_fallback"
         roi_bgr = img[wt:wb, wl:wr].copy()
         out_roi = _resolve_write(workspace, out_work_roi_path)
-        cv2.imwrite(str(out_roi), roi_bgr)
+        write_debug_image(out_roi, roi_bgr)
     else:
         best = min(cands, key=lambda c: c["dist"])
         gx = int(round(wl + best["xc"]))
@@ -986,12 +986,12 @@ def _tool_mark_tp_on_assembly_from_pdf_hit(
         step0c_path = "gray_thresh"
         roi_bgr = img[wt:wb, wl:wr].copy()
         out_roi = _resolve_write(workspace, out_work_roi_path)
-        cv2.imwrite(str(out_roi), roi_bgr)
+        write_debug_image(out_roi, roi_bgr)
 
     marked = img.copy()
     cv2.circle(marked, (gx, gy), gr, (0, 255, 0), 3)
     out_mark = _resolve_write(workspace, out_marked_path)
-    if not cv2.imwrite(str(out_mark), marked):
+    if not write_debug_image(out_mark, marked, max_pixels=pdf_raster_max_pixels()):
         return ToolResult(text=f"[mark-tp-tool] failed to write marked image: {out_mark}", ok=False)
 
     return ToolResult(
@@ -1126,7 +1126,7 @@ def _tool_detect_largest_ic_on_assembly_from_vlm_hint(
     marked = img.copy()
     cv2.rectangle(marked, (final[0], final[1]), (final[2], final[3]), (0, 0, 255), 4)
     out_box = _resolve_write(workspace, out_box_path)
-    cv2.imwrite(str(out_box), marked)
+    write_debug_image(out_box, marked)
 
     payload = {
         "vlm_roi_px": vlm_roi,
@@ -1156,6 +1156,314 @@ def _tool_detect_largest_ic_on_assembly_from_vlm_hint(
             f"work_roi_px={work_roi}\n"
             f"final_bbox={final}\n"
             f"candidate_count={len(candidates)}"
+        ),
+        images=[],
+    )
+
+
+def _load_board_image_landscape(
+    board_path: str,
+    cv2: Any,
+) -> tuple[Any, Path, bool]:
+    """Load board photo; rotate to landscape (width >= height) when needed."""
+    try:
+        board_p = _resolve_read(board_path)
+    except Exception:
+        fb = _tl_input_paths().get("front_board_photo")
+        if isinstance(fb, str) and fb.strip():
+            board_p = _resolve_read(fb)
+        else:
+            raise
+    img = cv2.imread(str(board_p))
+    if img is None:
+        raise RuntimeError(f"failed to read board image: {board_p}")
+    h, w = img.shape[:2]
+    rotated = False
+    if w < h:
+        img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        rotated = True
+    return img, board_p, rotated
+
+
+def _detect_pcb_region_bbox(img: Any, cv2: Any, np: Any) -> tuple[list[int], Any]:
+    """Segment dominant green PCB area; exclude border-hugging environment blobs."""
+    h, w = img.shape[:2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([35, 30, 30], dtype=np.uint8), np.array([90, 255, 255], dtype=np.uint8))
+    k_close = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close, iterations=2)
+    k_open = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    img_area = float(h * w)
+    kept: list[dict[str, Any]] = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area < img_area * 0.08:
+            continue
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        if cw <= 0 or ch <= 0:
+            continue
+        ar = cw / float(ch)
+        touch_l = x <= 8
+        touch_t = y <= 8
+        touch_r = (x + cw) >= (w - 8)
+        touch_b = (y + ch) >= (h - 8)
+        touch_cnt = int(touch_l) + int(touch_t) + int(touch_r) + int(touch_b)
+        if touch_cnt >= 3 and (ar > 1.8 or ar < 0.55):
+            continue
+        kept.append({"bbox": [x, y, x + cw, y + ch], "area": area})
+
+    if not kept:
+        return [0, 0, w, h], mask
+    kept.sort(key=lambda c: float(c["area"]), reverse=True)
+    return [int(v) for v in kept[0]["bbox"]], mask
+
+
+def _board_ic_candidate_score(candidate: dict[str, Any]) -> float:
+    area = float(candidate["area"])
+    ar = float(candidate["aspect"])
+    touch = int(candidate["touch_cnt"])
+    compact = min(ar, 1.0 / ar) if ar > 0 else 0.0
+    score = area * compact
+    if touch >= 3 and ar > 1.3:
+        score *= 0.05
+    elif touch >= 3 and ar < (1.0 / 1.3):
+        score *= 0.05
+    elif touch >= 2 and (ar > 1.55 or ar < 0.65):
+        score *= 0.2
+    return score
+
+
+def _find_largest_ic_in_roi(
+    img: Any,
+    work_roi: list[int],
+    cv2: Any,
+    np: Any,
+    *,
+    opencv_ballpark: dict[str, Any] | None = None,
+    pcb_mask: Any | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any], int]:
+    """Run OpenCV IC contour search inside work_roi; return best candidate + debug info."""
+    bp = opencv_ballpark if isinstance(opencv_ballpark, dict) else {}
+    wx1, wy1, wx2, wy2 = [int(v) for v in work_roi]
+    roi = img[wy1:wy2, wx1:wx2]
+    rh, rw = roi.shape[:2]
+    roi_area = float(max(1, rw * rh))
+
+    use_hsv = bool(bp.get("prefer_hsv_dark_package", True))
+    if use_hsv:
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        vu = int(bp.get("hsv_upper_v", 60))
+        bw = cv2.inRange(hsv, (0, 0, 0), (180, 255, max(1, vu)))
+        ksz = int(bp.get("morph_kernel_size", 5))
+        di = int(bp.get("morph_dilate_iter", 2))
+        ei = int(bp.get("morph_erode_iter", 1))
+        threshold_used = None
+    else:
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        tv = int(bp.get("fixed_thresh_inv_dark", 60))
+        _, bw = cv2.threshold(gray, tv, 255, cv2.THRESH_BINARY_INV)
+        dker = bp.get("dilate_kernel")
+        if isinstance(dker, list) and len(dker) >= 2 and isinstance(dker[0], (int, float)):
+            ksz = int(dker[0])
+        else:
+            ksz = int(bp.get("morph_kernel_size", 3))
+        di = int(bp.get("dilate_iter", bp.get("morph_dilate_iter", 1)))
+        ei = int(bp.get("erode_iter", bp.get("morph_erode_iter", 0)))
+        threshold_used = tv
+
+    if pcb_mask is not None:
+        roi_pcb = pcb_mask[wy1:wy2, wx1:wx2]
+        if roi_pcb.shape[:2] == bw.shape[:2]:
+            bw = cv2.bitwise_and(bw, roi_pcb)
+
+    k = max(3, int(ksz) | 1)
+    ker = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+    bw = cv2.dilate(bw, ker, iterations=max(0, int(di)))
+    if int(ei) > 0:
+        bw = cv2.erode(bw, ker, iterations=int(ei))
+
+    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    total_contours = len(contours)
+    min_a = float(bp.get("min_contour_area", 10000))
+    asp = bp.get("aspect_ratio")
+    if isinstance(asp, (list, tuple)) and len(asp) == 2:
+        ar_lo, ar_hi = float(asp[0]), float(asp[1])
+    else:
+        ar_lo, ar_hi = 0.65, 1.55
+    ss = bp.get("package_short_side_px")
+    if isinstance(ss, (list, tuple)) and len(ss) == 2:
+        ss_lo, ss_hi = int(ss[0]), int(ss[1])
+    else:
+        ss_lo, ss_hi = 200, 1000
+
+    candidates: list[dict[str, Any]] = []
+    for cnt in contours:
+        area = float(cv2.contourArea(cnt))
+        if area < min_a:
+            continue
+        x, y, cw, ch = cv2.boundingRect(cnt)
+        if ch <= 0:
+            continue
+        ar = cw / float(ch)
+        short = min(cw, ch)
+        if ar < ar_lo or ar > ar_hi or short < ss_lo or short > ss_hi:
+            continue
+        rect_area = float(max(1, cw * ch))
+        cover_ratio = rect_area / roi_area
+        touch_l = x <= 2
+        touch_t = y <= 2
+        touch_r = (x + cw) >= (rw - 2)
+        touch_b = (y + ch) >= (rh - 2)
+        touch_cnt = int(touch_l) + int(touch_t) + int(touch_r) + int(touch_b)
+        if cover_ratio > 0.90 and touch_cnt >= 3:
+            continue
+        if touch_cnt >= 3 and (ar > 1.55 or ar < 0.65):
+            continue
+        cand = {
+            "x": int(x), "y": int(y), "w": int(cw), "h": int(ch),
+            "area": float(area), "aspect": float(ar),
+            "cover_ratio": float(cover_ratio), "touch_cnt": int(touch_cnt),
+            "bbox_area": float(cw * ch),
+        }
+        cand["score"] = _board_ic_candidate_score(cand)
+        candidates.append(cand)
+
+    candidates.sort(key=lambda c: float(c["score"]), reverse=True)
+    best = candidates[0] if candidates else None
+    debug = {
+        "use_hsv_dark_package": bool(use_hsv),
+        "hsv_upper_v": int(bp.get("hsv_upper_v", 60)) if use_hsv else None,
+        "fixed_thresh_inv_dark": int(threshold_used) if threshold_used is not None else None,
+        "kernel_size": int(k),
+        "dilate_iter": int(di),
+        "erode_iter": int(ei),
+        "min_contour_area": float(min_a),
+        "aspect_ratio": [ar_lo, ar_hi],
+        "package_short_side_px": [ss_lo, ss_hi],
+        "mask": bw,
+        "threshold_used": threshold_used,
+    }
+    return best, debug, total_contours
+
+
+def _tool_detect_largest_ic_on_board_full(
+    workspace: Path,
+    board_path: str = "INPUT_PATHS.front_board_photo",
+    out_debug_path: str = "debug/case10_opencv_debug.png",
+    out_box_path: str = "debug/case10_largest_ic_box.png",
+    out_json_path: str = "debug/case10_largest_ic.json",
+    out_landscape_path: str = "debug/case10_board_landscape.png",
+) -> ToolResult:
+    """PartA full-board IC detection: PCB mask + QFP filters, no VLM hints."""
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[board-ic-full] missing dependency: {e}", ok=False)
+
+    try:
+        img, board_p, rotated = _load_board_image_landscape(board_path, cv2)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[board-ic-full] failed to load board image: {e}", ok=False)
+
+    H, W = img.shape[:2]
+    landscape_p = _resolve_write(workspace, out_landscape_path)
+    write_debug_image(landscape_p, img)
+
+    pcb_bbox, pcb_mask = _detect_pcb_region_bbox(img, cv2, np)
+    px1, py1, px2, py2 = pcb_bbox
+    pw, ph = px2 - px1, py2 - py1
+    pad = max(32, int(0.02 * max(pw, ph)))
+    work_roi = [
+        max(0, px1 - pad),
+        max(0, py1 - pad),
+        min(W, px2 + pad),
+        min(H, py2 + pad),
+    ]
+
+    opencv_ballpark = {
+        "prefer_hsv_dark_package": True,
+        "hsv_upper_v": 60,
+        "morph_kernel_size": 5,
+        "morph_dilate_iter": 2,
+        "morph_erode_iter": 1,
+        "min_contour_area": 10000,
+        "aspect_ratio": [0.65, 1.55],
+        "package_short_side_px": [200, 1000],
+    }
+    best, dbg, total_contours = _find_largest_ic_in_roi(
+        img, work_roi, cv2, np,
+        opencv_ballpark=opencv_ballpark,
+        pcb_mask=pcb_mask,
+    )
+
+    if best is None:
+        return ToolResult(
+            text=(
+                "[board-ic-full] No QFP-like IC found on PCB region.\n"
+                f"image={W}x{H} rotated={rotated}\n"
+                f"pcb_bbox_px={pcb_bbox}\n"
+                f"work_roi_px={work_roi}\n"
+                f"contours={total_contours}"
+            ),
+            ok=False,
+        )
+
+    wx1, wy1, _, _ = work_roi
+    fx1 = wx1 + int(best["x"])
+    fy1 = wy1 + int(best["y"])
+    fx2 = fx1 + int(best["w"])
+    fy2 = fy1 + int(best["h"])
+    final_bbox = [fx1, fy1, fx2, fy2]
+
+    marked = img.copy()
+    cv2.rectangle(marked, (px1, py1), (px2, py2), (0, 255, 0), 2)
+    cv2.rectangle(marked, (fx1, fy1), (fx2, fy2), (0, 0, 255), 4)
+    out_box = _resolve_write(workspace, out_box_path)
+    write_debug_image(out_box, marked)
+
+    debug_img = img.copy()
+    cv2.rectangle(debug_img, (work_roi[0], work_roi[1]), (work_roi[2], work_roi[3]), (255, 165, 0), 2)
+    cv2.rectangle(debug_img, (fx1, fy1), (fx2, fy2), (0, 0, 255), 3)
+    out_dbg = _resolve_write(workspace, out_debug_path)
+    write_debug_image(out_dbg, debug_img)
+
+    payload = {
+        "detection_mode": "full_board_pcb_mask",
+        "pcb_bbox_px": pcb_bbox,
+        "work_roi_px": work_roi,
+        "largest_ic_bbox": final_bbox,
+        "bbox": final_bbox,
+        "area": float(best["area"]),
+        "score": round(float(best["score"]), 2),
+        "threshold_used": dbg.get("threshold_used"),
+        "aspect": round(float(best["aspect"]), 4),
+        "cover_ratio": round(float(best["cover_ratio"]), 4),
+        "touch_edges": int(best["touch_cnt"]),
+        "board_rotated_to_landscape": bool(rotated),
+        "candidate_stats": {
+            "total_contours": int(total_contours),
+            "kept_candidates": 1,
+        },
+        "opencv_params": {k: v for k, v in dbg.items() if k != "mask"},
+        "image_size": [W, H],
+        "source_image": str(board_p),
+    }
+    out_json = _resolve_write(workspace, out_json_path)
+    out_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return ToolResult(
+        text=(
+            "Board full-image largest-IC detection completed.\n"
+            f"image={W}x{H} rotated={rotated}\n"
+            f"pcb_bbox_px={pcb_bbox}\n"
+            f"work_roi_px={work_roi}\n"
+            f"final_bbox={final_bbox}\n"
+            f"aspect={float(best['aspect']):.3f} touch_edges={int(best['touch_cnt'])}\n"
+            f"score={float(best['score']):.1f}"
         ),
         images=[],
     )
@@ -1250,80 +1558,22 @@ def _tool_detect_largest_ic_on_board_from_vlm_hint(
     rh, rw = roi.shape[:2]
     roi_area = float(max(1, rw * rh))
     bp = hints.get("opencv_ballpark") if isinstance(hints.get("opencv_ballpark"), dict) else {}
-    use_hsv = bool(bp.get("prefer_hsv_dark_package", False))
-    if use_hsv:
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        vu = int(bp.get("hsv_upper_v", 60))
-        lo, hi = (0, 0, 0), (180, 255, max(1, vu))
-        bw = cv2.inRange(hsv, lo, hi)
-        ksz = int(bp.get("morph_kernel_size", 5))
-        di = int(bp.get("morph_dilate_iter", 2))
-        ei = int(bp.get("morph_erode_iter", 1))
-        threshold_used = None
-    else:
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        tv = int(bp.get("fixed_thresh_inv_dark", 60))
-        _, bw = cv2.threshold(gray, tv, 255, cv2.THRESH_BINARY_INV)
-        dker = bp.get("dilate_kernel")
-        if isinstance(dker, list) and len(dker) >= 2 and isinstance(dker[0], (int, float)):
-            ksz = int(dker[0])
-        else:
-            ksz = int(bp.get("morph_kernel_size", 3))
-        di = int(bp.get("dilate_iter", bp.get("morph_dilate_iter", 1)))
-        ei = int(bp.get("erode_iter", bp.get("morph_erode_iter", 0)))
-        threshold_used = tv
+    if "aspect_ratio" not in bp:
+        bp = {**bp, "aspect_ratio": [0.65, 1.55]}
+    if "package_short_side_px" not in bp:
+        bp = {**bp, "package_short_side_px": [200, 1000]}
 
-    k = max(3, int(ksz) | 1)
-    ker = cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
-    bw = cv2.dilate(bw, ker, iterations=max(0, int(di)))
-    if int(ei) > 0:
-        bw = cv2.erode(bw, ker, iterations=int(ei))
-
-    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    total_contours = len(contours)
-    min_a = float(bp.get("min_contour_area", 10000))
-    asp = bp.get("aspect_ratio")
-    if isinstance(asp, (list, tuple)) and len(asp) == 2:
-        ar_lo, ar_hi = float(asp[0]), float(asp[1])
-    else:
-        ar_lo, ar_hi = 0.0, 999.0
-    ss = bp.get("package_short_side_px")
-    if isinstance(ss, (list, tuple)) and len(ss) == 2:
-        ss_lo, ss_hi = int(ss[0]), int(ss[1])
-    else:
-        ss_lo, ss_hi = 0, 999999
-
-    candidates: list[dict[str, Any]] = []
-    for cnt in contours:
-        area = float(cv2.contourArea(cnt))
-        if area < min_a:
-            continue
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        if ch <= 0:
-            continue
-        ar = cw / float(ch)
-        short = min(cw, ch)
-        if ar < ar_lo or ar > ar_hi or short < ss_lo or short > ss_hi:
-            continue
-        rect_area = float(max(1, cw * ch))
-        cover_ratio = rect_area / roi_area
-        touch_l = x <= 2
-        touch_t = y <= 2
-        touch_r = (x + cw) >= (rw - 2)
-        touch_b = (y + ch) >= (rh - 2)
-        touch_cnt = int(touch_l) + int(touch_t) + int(touch_r) + int(touch_b)
-        if cover_ratio > 0.90 and touch_cnt >= 3:
-            continue
-        candidates.append({
-            "x": int(x), "y": int(y), "w": int(cw), "h": int(ch),
-            "area": float(area), "aspect": float(ar),
-            "cover_ratio": float(cover_ratio), "touch_cnt": int(touch_cnt),
-            "bbox_area": float(cw * ch),
-        })
-
-    candidates.sort(key=lambda c: float(c["area"]), reverse=True)
-    best = candidates[0] if candidates else None
-    best_mask = bw
+    best, dbg, total_contours = _find_largest_ic_in_roi(
+        img, work_roi, cv2, np, opencv_ballpark=bp,
+    )
+    use_hsv = bool(dbg.get("use_hsv_dark_package"))
+    threshold_used = dbg.get("threshold_used")
+    k = int(dbg.get("kernel_size", 3))
+    di = int(dbg.get("dilate_iter", 1))
+    ei = int(dbg.get("erode_iter", 0))
+    ar_lo, ar_hi = dbg.get("aspect_ratio", [0.65, 1.55])
+    ss_lo, ss_hi = dbg.get("package_short_side_px", [200, 1000])
+    min_a = float(dbg.get("min_contour_area", 10000))
 
     if best is None:
         return ToolResult(
@@ -1346,7 +1596,7 @@ def _tool_detect_largest_ic_on_board_from_vlm_hint(
     marked = img.copy()
     cv2.rectangle(marked, (fx1, fy1), (fx2, fy2), (0, 0, 255), 4)
     out_box = _resolve_write(workspace, out_box_path)
-    cv2.imwrite(str(out_box), marked)
+    write_debug_image(out_box, marked)
 
     out_json = _resolve_write(workspace, out_json_path)
     payload = {
@@ -1359,7 +1609,7 @@ def _tool_detect_largest_ic_on_board_from_vlm_hint(
         "aspect": round(float(best["aspect"]), 4),
         "cover_ratio": round(float(best["cover_ratio"]), 4),
         "touch_edges": int(best["touch_cnt"]),
-        "candidate_stats": {"total_contours": int(total_contours), "kept_candidates": int(len(candidates))},
+        "candidate_stats": {"total_contours": int(total_contours), "kept_candidates": 1},
         "opencv_params": {
             "use_hsv_dark_package": bool(use_hsv),
             "hsv_upper_v": int(bp.get("hsv_upper_v", 60)) if use_hsv else None,
@@ -1384,7 +1634,7 @@ def _tool_detect_largest_ic_on_board_from_vlm_hint(
             f"final_bbox={final_bbox}\n"
             f"area={float(best['area']):.1f} threshold={threshold_used}\n"
             f"cover_ratio={float(best['cover_ratio']):.3f} touch_edges={int(best['touch_cnt'])}\n"
-            f"candidates(total={int(total_contours)}, kept={int(len(candidates))})"
+            f"candidates(total={int(total_contours)}, kept=1)"
         ),
         images=[],
     )
@@ -1490,11 +1740,14 @@ def _tool_emit_step08_from_case12_aligned(
     if isinstance(mapping_method, str) and mapping_method.strip() in {
         "case12_step02_opencv_ic_align",
         "case12_step02_vlm_ic_align",
+        "back_board_outline_holes",
     }:
         final_method = mapping_method.strip()
 
     with Image.open(board_p) as im:
-        base = im.convert("RGB")
+        # Match OpenCV registration coordinates for camera JPEGs carrying an
+        # EXIF orientation tag. PNG output has no tag to fix the view later.
+        base = ImageOps.exif_transpose(im).convert("RGB")
     w, h = base.size
     try:
         from case12_step02_graph import clamp_board_pixel
@@ -1512,7 +1765,7 @@ def _tool_emit_step08_from_case12_aligned(
     draw.text((min(x + r + 8, w - 120), max(0, y - r - 16)), "TP", fill="red")
 
     out_png = _resolve_write(workspace, out_step08_png_path)
-    base.save(out_png)
+    write_debug_image(out_png, base)
 
     out_json = _resolve_write(workspace, out_step08_json_path)
     selected_id = "TP_candidate"
@@ -1565,6 +1818,216 @@ def _tool_emit_step08_from_case12_aligned(
     )
 
 
+def _tool_prepare_back_board_landmark_candidates(
+    workspace: Path,
+    locator_path: str = "debug/case10_assembly_drawing_tp_marked.png",
+    back_board_path: str = "INPUT_PATHS.back_board_photo",
+) -> ToolResult:
+    """Generate numbered CV proposals that the VLM must semantically review."""
+    try:
+        from .back_board_registration import prepare_landmark_review
+        locator = _resolve_read(locator_path)
+        board = _resolve_read(back_board_path)
+        debug = _resolve_write(workspace, "debug/back_optional_candidate_classification.json").parent
+        summary = prepare_landmark_review(locator, board, debug)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[back-landmark-candidates] failed: {e}", ok=False)
+    return ToolResult(
+        text=(
+            "Back-board landmark candidate sheets prepared for mandatory VLM semantic review.\n"
+            "View BOTH optional locator/photo candidate images (or the combined optional sheet), "
+            "then call record_back_landmark_review.\n"
+            f"locator_candidates={summary['locator_candidate_count']} "
+            f"photo_candidates={summary['photo_candidate_count']}\n"
+            f"combined_sheet={summary['candidate_sheet']}"
+        ),
+        images=[str(summary["candidate_sheet"])],
+    )
+
+
+def _tool_record_back_landmark_review(
+    workspace: Path,
+    matches: list[dict[str, Any]],
+    overall_evidence: str,
+    rejected_ids: list[str] | None = None,
+    out_path: str = "debug/back_vlm_landmark_review.json",
+) -> ToolResult:
+    """Validate and persist VLM semantic landmark classifications/correspondences."""
+    allowed = {"mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"}
+    if not isinstance(matches, list) or len(matches) < 2:
+        return ToolResult(text="[back-landmark-review] at least two matches are required; PCB corners remain the primary transform.", ok=False)
+    if not str(overall_evidence or "").strip():
+        return ToolResult(text="[back-landmark-review] overall visual evidence is required.", ok=False)
+    try:
+        candidate_path = _resolve_read("debug/back_optional_candidate_classification.json")
+        candidate_data = json.loads(candidate_path.read_text(encoding="utf-8"))
+        valid_locator_ids = {
+            str(item.get("id")) for key in ("accepted_by_cv", "rejected_by_cv")
+            for item in candidate_data.get("locator", {}).get(key, [])
+        }
+        valid_board_ids = {
+            str(item.get("id")) for key in ("accepted_by_cv", "rejected_by_cv")
+            for item in candidate_data.get("photo", {}).get(key, [])
+        }
+    except Exception as exc:  # noqa: BLE001
+        return ToolResult(text=f"[back-landmark-review] cannot load candidate IDs: {exc}", ok=False)
+    normalized: list[dict[str, Any]] = []
+    used_locator: set[str] = set()
+    used_board: set[str] = set()
+    for index, match in enumerate(matches, 1):
+        if not isinstance(match, dict):
+            return ToolResult(text=f"[back-landmark-review] match #{index} must be an object.", ok=False)
+        locator_id = str(match.get("locator_id", "")).strip()
+        board_id = str(match.get("board_id", "")).strip()
+        landmark_type = str(match.get("landmark_type", "")).strip().lower()
+        evidence = str(match.get("evidence", "")).strip()
+        try:
+            confidence = float(match.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if not locator_id or not board_id or locator_id in used_locator or board_id in used_board:
+            return ToolResult(text=f"[back-landmark-review] match #{index} has missing or duplicate candidate IDs.", ok=False)
+        if locator_id not in valid_locator_ids or board_id not in valid_board_ids:
+            return ToolResult(
+                text=(f"[back-landmark-review] match #{index} references IDs not drawn on the candidate sheet: "
+                      f"{locator_id} -> {board_id}. Valid locator IDs={sorted(valid_locator_ids)}; "
+                      f"valid photo IDs={sorted(valid_board_ids)}."),
+                ok=False,
+            )
+        if landmark_type not in allowed:
+            return ToolResult(text=f"[back-landmark-review] match #{index} has unsupported landmark_type={landmark_type!r}.", ok=False)
+        if confidence < 0.55 or confidence > 1.0 or not evidence:
+            return ToolResult(text=f"[back-landmark-review] match #{index} needs confidence >=0.55 and visual evidence.", ok=False)
+        used_locator.add(locator_id)
+        used_board.add(board_id)
+        normalized.append({
+            "locator_id": locator_id, "board_id": board_id,
+            "landmark_type": landmark_type, "confidence": round(confidence, 3),
+            "evidence": evidence,
+        })
+    payload = {
+        "review_source": "vlm_visual_semantic_review",
+        "overall_evidence": str(overall_evidence).strip(),
+        "matches": normalized,
+        "rejected_ids": [str(item) for item in (rejected_ids or [])],
+        "policy": "Solder pads, vias and TP pads are forbidden as global registration anchors.",
+    }
+    out = _resolve_write(workspace, out_path)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return ToolResult(text=f"Recorded {len(normalized)} VLM-reviewed back-board landmark pairs: {out}")
+
+
+def _tool_register_back_board_from_outline_and_holes(
+    workspace: Path,
+    locator_path: str = "debug/case10_assembly_drawing_tp_marked.png",
+    back_board_path: str = "INPUT_PATHS.back_board_photo",
+    review_path: str = "debug/back_vlm_landmark_review.json",
+    out_json_path: str = "debug/back_board_registration.json",
+    out_overlay_path: str = "debug/back_board_registration_overlay.png",
+) -> ToolResult:
+    """Map a green-marked back-side locator to a back board using outline holes."""
+    try:
+        from .back_board_registration import draw_overlay, register
+        locator = _resolve_read(locator_path)
+        board = _resolve_read(back_board_path)
+        out_json = _resolve_write(workspace, out_json_path)
+        out_overlay = _resolve_write(workspace, out_overlay_path)
+        try:
+            review = _resolve_read(review_path)
+        except Exception:
+            review = None
+        result = register(locator, board, debug_dir=out_json.parent, review_path=review)
+        out_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        draw_overlay(board, result, out_overlay)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(text=f"[back-board-registration] failed: {e}", ok=False)
+    target = result["board_roi_target_px_approx"]
+    return ToolResult(
+        text=(
+            "Back-board outline/hole registration completed.\n"
+            f"locator={locator}\nboard={board}\n"
+            f"target_px={target}\n"
+            f"inlier_holes={result['inlier_hole_count']} mean_error_px={result['mean_hole_error_px']} "
+            f"confidence={result['confidence']}\n"
+            f"saved:\n- {out_json}\n- {out_overlay}"
+        ),
+        images=[str(out_overlay)],
+    )
+
+
+def _tool_record_board_side_decision(
+    workspace: Path,
+    side: str,
+    evidence: str,
+    confidence: float = 0.0,
+    out_path: str = "debug/board_side_decision.json",
+) -> ToolResult:
+    """Persist a VLM visual decision about which physical side contains the TP."""
+    normalized = str(side or "").strip().lower()
+    aliases = {"front": "front", "top": "front", "正面": "front", "back": "back", "bottom": "back", "bot": "back", "背面": "back"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in {"front", "back"}:
+        return ToolResult(text="[board-side-decision] side must be front or back.", ok=False)
+    if not str(evidence or "").strip():
+        return ToolResult(text="[board-side-decision] visual/textual locator evidence is required.", ok=False)
+    try:
+        conf = max(0.0, min(1.0, float(confidence)))
+    except (TypeError, ValueError):
+        conf = 0.0
+    available = {
+        "front": bool(_tl_input_paths().get("front_board_photo")),
+        "back": bool(_tl_input_paths().get("back_board_photo")),
+    }
+    payload = {
+        "side": normalized,
+        "camera_view": normalized,
+        "evidence": str(evidence).strip(),
+        "confidence": round(conf, 3),
+        "corresponding_photo_available": bool(available[normalized]),
+        "decision_source": "vlm_locator_visual_inspection",
+    }
+    out = _resolve_write(workspace, out_path)
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if not available[normalized]:
+        return ToolResult(
+            text=(
+                f"Board side decided as {normalized}, but INPUT_PATHS.{normalized}_board_photo is missing. "
+                "The final localization must request the corresponding physical image."
+            ),
+            ok=False,
+        )
+    return ToolResult(
+        text=f"Board side decided: {normalized}; confidence={conf:.3f}; saved={out}",
+    )
+
+
+def _tool_emit_step08_from_back_board_registration(
+    workspace: Path,
+    registration_json_path: str = "debug/back_board_registration.json",
+    back_board_path: str = "INPUT_PATHS.back_board_photo",
+) -> ToolResult:
+    """Produce the standard final artifacts for the back-side registration path."""
+    result = _tool_emit_step08_from_case12_aligned(
+        workspace=workspace,
+        aligned_json_path=registration_json_path,
+        board_anchor_path=back_board_path,
+        out_step08_png_path="debug/step08_final_tp.png",
+        out_step08_json_path="debug/step08_result.json",
+        out_mapping_json_path="debug/step03_mapping.json",
+        mapping_method="back_board_outline_holes",
+    )
+    if result.ok:
+        try:
+            out = _resolve_write(workspace, "debug/step08_result.json")
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            payload["camera_view"] = "back"
+            payload["mapping_method"] = "back_board_outline_holes"
+            out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001
+            return ToolResult(text=f"[back-board-step08] failed to tag final result: {e}", ok=False)
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Image tools
 # --------------------------------------------------------------------------- #
@@ -1589,6 +2052,15 @@ def _tool_view_image(path: str, note: str = "") -> ToolResult:
                 "First convert a PDF page to PNG via `pdf_page_to_image`, "
                 "then call `view_image` on the generated PNG path."
             ),
+            ok=False,
+        )
+    try:
+        with Image.open(p) as im:
+            im.verify()
+    except Exception:
+        return ToolResult(
+            text=(f"[view-image-error] `{p}` is not a readable raster image. "
+                  "Use `read_text_file` for JSON/text artifacts."),
             ok=False,
         )
     text = f"Attached image: {p}"
@@ -1677,7 +2149,13 @@ def _tool_pdf_page_to_image(
                 matrix=fitz.Matrix(zoom, zoom),
                 alpha=False,
             )
-        pix.save(str(out))
+        pix_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        if not write_debug_image(out, pix_img, max_pixels=pdf_raster_max_pixels()):
+            doc.close()
+            return ToolResult(
+                text=f"[pdf-convert-error] failed to write output image: {out}",
+                ok=False,
+            )
         doc.close()
         return ToolResult(
             text=(
@@ -1703,7 +2181,11 @@ def _tool_pdf_page_to_image(
                 text=f"[pdf-convert-error] failed to render page {page}.",
                 ok=False,
             )
-        pages[0].save(out, format="PNG")
+        if not write_debug_image(out, pages[0], max_pixels=pdf_raster_max_pixels()):
+            return ToolResult(
+                text=f"[pdf-convert-error] failed to write output image: {out}",
+                ok=False,
+            )
         with Image.open(out) as im:
             w, h = im.size
         return ToolResult(
@@ -1865,7 +2347,12 @@ def _tool_pdf_draw_circle_then_rasterize(
         zoom = dpi / 72.0
         with _fitz_render_prefs(graphics_min_line_width, aa_level):
             pix = pg.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
-        pix.save(str(out))
+        pix_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        if not write_debug_image(out, pix_img, max_pixels=pdf_raster_max_pixels()):
+            return ToolResult(
+                text=f"[pdf-draw-raster-error] failed to write output image: {out}",
+                ok=False,
+            )
         return ToolResult(
             text=(
                 f"Drew green circle in PDF space center=({cx:.3f},{cy:.3f}) pt, r={r:.3f} pt, "
@@ -1954,7 +2441,11 @@ def _tool_crop_image(workspace: Path, path: str, bbox: list[int],
                 ok=False,
             )
         cropped = im.crop((l, t, r, b))
-        cropped.save(out)
+        if not write_debug_image(out, cropped):
+            return ToolResult(
+                text=f"[crop-error] failed to write output image: {out}",
+                ok=False,
+            )
     return ToolResult(
         text=f"Cropped {p} with bbox={bbox} → {out} ({cropped.size[0]}x{cropped.size[1]})",
         images=[str(out)],
@@ -2054,7 +2545,7 @@ def _tool_crop_green_tp_neighborhood_on_locator(
 
     out = _resolve_write(workspace, out_path)
     crop = img[t:b, l:r]
-    cv2.imwrite(str(out), crop)
+    write_debug_image(out, crop)
     cw, ch = r - l, b - t
     return ToolResult(
         text=(
@@ -2231,7 +2722,11 @@ def _tool_annotate_image(workspace: Path, path: str,
             ),
             ok=False,
         )
-    img.save(out)
+    if not write_debug_image(out, img):
+        return ToolResult(
+            text=f"[annotate-image] failed to write output image: {out}",
+            ok=False,
+        )
     if _is_stepb3_assembly_largest_ic_box_png(out):
         _stepb3_invalidate_view_gate(workspace)
     extra = f"\nNote: {'; '.join(rect_errors)}" if rect_errors else ""
@@ -2641,7 +3136,7 @@ def _tool_run_candidate_pipeline(workspace: Path,
         cv2.putText(step05_img, f"{c['id']}:{c['score_local_feature']:.2f}", (cx + 3, cy - 3),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 0), 1)
     step05_path = out_dir / "step05_local_feature_scores.png"
-    cv2.imwrite(str(step05_path), step05_img)
+    write_debug_image(step05_path, step05_img)
 
     step06_img = roi_img.copy()
     for c in candidates:
@@ -2651,7 +3146,7 @@ def _tool_run_candidate_pipeline(workspace: Path,
         cv2.putText(step06_img, f"{c['id']}:{c['score_semantic']:.2f}", (cx + 3, cy - 3),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
     step06_path = out_dir / "step06_semantic_scores.png"
-    cv2.imwrite(str(step06_path), step06_img)
+    write_debug_image(step06_path, step06_img)
 
     if board_img is not None:
         step57_img = board_img.copy()
@@ -2674,7 +3169,7 @@ def _tool_run_candidate_pipeline(workspace: Path,
             step57_img, workspace, roi_bbox, coords_are_roi=True
         )
     step57_path = out_dir / "step57_candidates_scored.png"
-    cv2.imwrite(str(step57_path), step57_img)
+    write_debug_image(step57_path, step57_img)
 
     top = candidates[0] if candidates else None
     top_text = "none"
@@ -2838,7 +3333,7 @@ def _tool_run_step3_mapping(
             (0, 0, 255),
             1,
         )
-        cv2.imwrite(str(out_img), vis)
+        write_debug_image(out_img, vis)
 
         return ToolResult(
             text=(
@@ -3037,12 +3532,9 @@ def _tool_match_green_tp_roi_to_board(
         }
 
         def _imwrite_bgr(path: Path, img: Any) -> None:
-            if cv2.imwrite(str(path), img):
+            if write_debug_image(path, img):
                 return
-            ok, buf = cv2.imencode(".png", img)
-            if not ok:
-                raise OSError(f"cv2.imencode failed for {path}")
-            path.write_bytes(buf.tobytes())
+            raise OSError(f"write_debug_image failed for {path}")
 
         out_tpl = _resolve_write(workspace, out_template_path)
         _imwrite_bgr(out_tpl, roi_clean)
@@ -3616,6 +4108,159 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
                 out_step08_json_path=out_step08_json_path,
                 out_mapping_json_path=out_mapping_json_path,
                 mapping_method=mapping_method,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="prepare_back_board_landmark_candidates",
+        description=(
+            "Prepare numbered locator/photo candidate sheets for VLM semantic landmark review. "
+            "This tool does not register or map the TP. It only proposes candidates and writes debug evidence."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "locator_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
+                "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
+            },
+        },
+        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png", back_board_path="INPUT_PATHS.back_board_photo":
+            _tool_prepare_back_board_landmark_candidates(workspace, locator_path, back_board_path),
+    ))
+
+    reg.register(Tool(
+        name="record_back_landmark_review",
+        description=(
+            "After visually inspecting the numbered locator/photo candidate sheets, classify true mechanical "
+            "landmarks and record their one-to-one correspondence. Never select solder pads, vias or TP pads."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "matches": {
+                    "type": "array", "minItems": 3,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "locator_id": {"type": "string"}, "board_id": {"type": "string"},
+                            "landmark_type": {"type": "string", "enum": ["mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"]},
+                            "confidence": {"type": "number", "minimum": 0.55, "maximum": 1.0},
+                            "evidence": {"type": "string"},
+                        },
+                        "required": ["locator_id", "board_id", "landmark_type", "confidence", "evidence"],
+                    },
+                },
+                "overall_evidence": {"type": "string"},
+                "rejected_ids": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["matches", "overall_evidence"],
+        },
+        fn=lambda matches, overall_evidence, rejected_ids=None: _tool_record_back_landmark_review(
+            workspace, matches, overall_evidence, rejected_ids
+        ),
+    ))
+
+    reg.register(Tool(
+        name="record_board_side_decision",
+        description=(
+            "After viewing the green-marked locator page, record whether that TP is on the front "
+            "or back side. Base the decision on locator labels such as TOP/BOTTOM/FRONT/BACK, page "
+            "title, mirrored silkscreen/component layout, and visible side-specific evidence."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "side": {"type": "string", "enum": ["front", "back"]},
+                "evidence": {"type": "string"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            "required": ["side", "evidence"],
+        },
+        fn=lambda side, evidence, confidence=0.0: _tool_record_board_side_decision(
+            workspace=workspace,
+            side=side,
+            evidence=evidence,
+            confidence=confidence,
+        ),
+    ))
+
+    reg.register(Tool(
+        name="register_back_board_from_outline_and_holes",
+        description=(
+            "Back-side registration path: detect the PCB outline and circular mounting/tooling holes "
+            "on the green-marked locator and the back board photo, fit a deterministic homography "
+            "mapping, and write the projected TP plus an evidence overlay. A prior "
+            "back_vlm_landmark_review.json with semantic one-to-one correspondences is mandatory. "
+            "Use this instead of largest-IC detection when target_board_side is back."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "locator_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
+                "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
+                "review_path": {"type": "string", "default": "debug/back_vlm_landmark_review.json"},
+            },
+        },
+        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png", back_board_path="INPUT_PATHS.back_board_photo", review_path="debug/back_vlm_landmark_review.json":
+            _tool_register_back_board_from_outline_and_holes(
+                workspace=workspace,
+                locator_path=locator_path,
+                back_board_path=back_board_path,
+                review_path=review_path,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="emit_step08_from_back_board_registration",
+        description=(
+            "Back-side deterministic finalization. Read back_board_registration.json, draw the "
+            "final TP marker on the back photo, and write the standard step08 and mapping JSON artifacts."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "registration_json_path": {"type": "string", "default": "debug/back_board_registration.json"},
+                "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
+            },
+        },
+        fn=lambda registration_json_path="debug/back_board_registration.json", back_board_path="INPUT_PATHS.back_board_photo":
+            _tool_emit_step08_from_back_board_registration(
+                workspace=workspace,
+                registration_json_path=registration_json_path,
+                back_board_path=back_board_path,
+            ),
+    ))
+
+    reg.register(Tool(
+        name="detect_largest_ic_on_board_full",
+        description=(
+            "PartA deterministic board IC detection without VLM hints: auto-detect green PCB "
+            "region on the full board photo, apply QFP-oriented OpenCV filters, and write "
+            "`case10_board_landscape.png`, `case10_largest_ic_box.png`, and `case10_largest_ic.json`."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "board_path": {"type": "string", "default": "INPUT_PATHS.front_board_photo"},
+                "out_debug_path": {"type": "string", "default": "debug/case10_opencv_debug.png"},
+                "out_box_path": {"type": "string", "default": "debug/case10_largest_ic_box.png"},
+                "out_json_path": {"type": "string", "default": "debug/case10_largest_ic.json"},
+                "out_landscape_path": {"type": "string", "default": "debug/case10_board_landscape.png"},
+            },
+            "required": [],
+        },
+        fn=lambda board_path="INPUT_PATHS.front_board_photo",
+            out_debug_path="debug/case10_opencv_debug.png",
+            out_box_path="debug/case10_largest_ic_box.png",
+            out_json_path="debug/case10_largest_ic.json",
+            out_landscape_path="debug/case10_board_landscape.png":
+            _tool_detect_largest_ic_on_board_full(
+                workspace=workspace,
+                board_path=board_path,
+                out_debug_path=out_debug_path,
+                out_box_path=out_box_path,
+                out_json_path=out_json_path,
+                out_landscape_path=out_landscape_path,
             ),
     ))
 

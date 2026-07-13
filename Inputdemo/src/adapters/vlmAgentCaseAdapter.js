@@ -15,6 +15,7 @@ export class VlmAgentCaseAdapter {
 
     const savedAssets = {
       cameraImage: await this.saveFile(caseDir, input.cameraImage, "front_board_photo"),
+      cameraImageBack: await this.saveFile(caseDir, input.cameraImageBack, "back_board_photo"),
       bitImages: await this.saveFiles(caseDir, input.bitImages, "bit"),
       schematicDiagrams: await this.saveFiles(caseDir, input.schematicDiagrams, "schematic")
     };

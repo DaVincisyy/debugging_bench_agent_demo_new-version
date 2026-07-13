@@ -110,6 +110,14 @@ class Agent:
         self._run_inputs: dict[str, Any] = {}
         self._part0_mark_tp_calls = 0
 
+    def _emit(self, event_type: str, payload: dict[str, Any]) -> None:
+        if self._event_sink is None:
+            return
+        try:
+            self._event_sink(event_type, payload)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------ #
     # Public API
     # ------------------------------------------------------------------ #
@@ -119,9 +127,9 @@ class Agent:
             run_name: str | None = None) -> AgentRun:
         """Execute the agent loop for a single task.
 
-        `inputs` is a free-form dict. Keys whose value is a path ending in
-        a common image extension are auto-attached as images in the first
-        user turn; everything else is listed as text context.
+        `inputs` is a free-form dict. Image paths are listed as text only in
+        the first user turn; the agent attaches images via ``view_image`` or
+        tool-produced artifacts (Lynn workflow), not as raw multi-MB init blobs.
         """
         wf_mode = str(getattr(self.cfg, "workflow_mode", "default") or "default").strip()
         if not wf_mode:
@@ -191,6 +199,13 @@ class Agent:
                 )
             except Exception:
                 pass
+            self._emit("agent.run_dir", {
+                "run_dir": str(run_dir),
+                "task_flow": [
+                    {"step_id": s.step_id, "title": s.title}
+                    for s in plan_steps
+                ],
+            })
 
         step_budget_warned = False
         try:
@@ -234,6 +249,21 @@ class Agent:
                     else None
                 )
                 step_input_messages = self._snapshot_messages(messages)
+                current_plan = (
+                    plan_steps[plan_idx]
+                    if plan_steps and 0 <= plan_idx < len(plan_steps)
+                    else None
+                )
+                self._emit("agent.waiting", {
+                    "index": step_idx,
+                    "step": step_idx + 1,
+                    "step_id": current_plan.step_id if current_plan else None,
+                    "step_title": current_plan.title if current_plan else None,
+                    "task_flow": [
+                        {"step_id": s.step_id, "title": s.title}
+                        for s in plan_steps
+                    ] if plan_steps else [],
+                })
                 t0 = time.time()
                 reply = self.client.chat(messages, tools_schema=step_tools_schema or tools_schema)
                 llm_dt = time.time() - t0
@@ -294,6 +324,14 @@ class Agent:
                             "usage": llm_usage,
                         },
                     )
+                    self._emit("agent.step", {
+                        "index": step_idx,
+                        "step": step_idx + 1,
+                        "step_id": current_plan.step_id if current_plan else None,
+                        "step_title": current_plan.title if current_plan else None,
+                        "tool_calls": [],
+                        "timing": step_timing,
+                    })
                     self._render_step_timing(step_idx, step_timing, [])
                     # Some models occasionally emit an empty assistant turn.
                     # Nudge once to either continue with tools or terminate
@@ -374,6 +412,12 @@ class Agent:
                     exec_arguments: Any = call.arguments
                     if call.name == "finish" and isinstance(call.arguments, dict):
                         exec_arguments = normalize_finish_arguments(call.arguments)
+                    self._emit("tool.started", {
+                        "index": step_idx,
+                        "step": step_idx + 1,
+                        "tool_call": {"name": call.name},
+                        "name": call.name,
+                    })
                     tool_t0 = time.time()
                     result_obj = self.registry.run(call.name, exec_arguments)
                     tool_dt = time.time() - tool_t0
@@ -648,6 +692,15 @@ class Agent:
                         "usage": llm_usage,
                     },
                 )
+                tool_names = [tc.get("name") for tc in tool_call_payload if tc.get("name")]
+                self._emit("agent.step", {
+                    "index": step_idx,
+                    "step": step_idx + 1,
+                    "step_id": current_plan.step_id if current_plan else None,
+                    "step_title": current_plan.title if current_plan else None,
+                    "tool_calls": tool_names,
+                    "timing": step_timing,
+                })
                 self._render_step_timing(step_idx, step_timing, tool_timing_payload)
                 latest = result.steps[-1]
                 current_phase = self._maybe_emit_phase_summary(
@@ -903,6 +956,11 @@ class Agent:
                 continue
         if self._is_step3_premarked_case(inputs):
             return self._step3_premarked_workflow_plan()
+        if (
+            str(inputs.get("target_board_side", "")).strip().lower() == "auto"
+            or (isinstance(inputs.get("back_board_photo"), str) and str(inputs.get("back_board_photo")).strip())
+        ):
+            return self._auto_side_workflow_plan()
         return self._default_workflow_plan()
 
     @staticmethod
@@ -1079,13 +1137,12 @@ class Agent:
             WorkflowPlanStep(
                 step_id="parta_board_largest_ic",
                 title="PartA board largest IC",
-                objective="VLM gives board ROI first, then OpenCV runs inside ROI on stable horizontal board frame.",
+                objective="Full-board OpenCV detects largest QFP on PCB (no VLM hints); writes landscape + red box.",
                 done_any_artifacts=[
-                    "debug/case10_vlm_hints.json",
                     "debug/case10_largest_ic_box.png",
                     "debug/case10_largest_ic.json",
                 ],
-                allowed_tools=["run_python", "detect_largest_ic_on_board_from_vlm_hint", "view_image", "save_text_file", "annotate_image", "read_text_file"],
+                allowed_tools=["run_python", "detect_largest_ic_on_board_full", "detect_largest_ic_on_board_from_vlm_hint", "view_image", "save_text_file", "annotate_image", "read_text_file"],
             ),
             WorkflowPlanStep(
                 step_id="partd_case12_align_and_finish",
@@ -1097,9 +1154,115 @@ class Agent:
                     "debug/step08_result.json",
                     "debug/step08_final_tp.png",
                 ],
-                allowed_tools=["case12_build_and_align_from_step02_anchors", "emit_step08_from_case12_aligned", "run_python", "annotate_image", "save_text_file", "finish", "view_image"],
+                allowed_tools=["case12_build_and_align_from_step02_anchors", "emit_step08_from_case12_aligned", "run_python", "annotate_image", "save_text_file", "finish", "view_image", "read_text_file"],
             ),
         ]
+
+    @staticmethod
+    def _back_board_workflow_plan() -> list[WorkflowPlanStep]:
+        """Back side: TP locator page -> outline/hole geometry, no largest-IC anchor."""
+        return [
+            WorkflowPlanStep(
+                step_id="part0_signal_to_tp",
+                title="Part0-A infer target TP",
+                objective="Write debug/case10_signal_to_tp.json from user question + schematic evidence.",
+                done_any_artifacts=["debug/case10_signal_to_tp.json"],
+                allowed_tools=["read_text_file", "view_image", "search_pdf_text", "save_text_file", "pdf_page_to_image"],
+            ),
+            WorkflowPlanStep(
+                step_id="part0_pdf_search_and_mark",
+                title="Part0-B/C mark TP on the back locator page",
+                objective="Produce the green-marked assembly page for the requested back-side TP.",
+                done_any_artifacts=[
+                    "debug/case10_target_tp_pdf_search.json",
+                    "debug/case10_assembly_drawing.png",
+                    "debug/case10_assembly_drawing_tp_marked.png",
+                ],
+                allowed_tools=["search_pdf_text", "mark_tp_on_assembly_from_pdf_hit", "pdf_page_to_image", "view_image", "run_python"],
+            ),
+            WorkflowPlanStep(
+                step_id="partback_board_registration",
+                title="Back board outline and hole registration",
+                objective="Do not detect a largest IC. Register the green-marked locator to INPUT_PATHS.back_board_photo using PCB outline and circular mounting/tooling holes.",
+                done_any_artifacts=["debug/back_board_registration.json", "debug/back_board_registration_overlay.png"],
+                allowed_tools=["view_image", "register_back_board_from_outline_and_holes"],
+                next_action_hint="Call register_back_board_from_outline_and_holes with the marked locator and INPUT_PATHS.back_board_photo.",
+            ),
+            WorkflowPlanStep(
+                step_id="partback_finish",
+                title="Back board final marker",
+                objective="Create standard Step08 artifacts from the back-board registration and finish.",
+                done_any_artifacts=["debug/step03_mapping.json", "debug/step08_final_tp.png", "debug/step08_result.json"],
+                allowed_tools=["emit_step08_from_back_board_registration", "finish"],
+                next_action_hint="Call emit_step08_from_back_board_registration, then finish using debug/step08_result.json.",
+            ),
+        ]
+
+    @staticmethod
+    def _auto_side_workflow_plan() -> list[WorkflowPlanStep]:
+        """Infer side from the marked locator, then execute the matching geometry path."""
+        plan = Agent._default_workflow_plan()
+        side_step = WorkflowPlanStep(
+            step_id="partside_locator_decision",
+            title="Infer physical board side from locator",
+            objective=(
+                "View debug/case10_assembly_drawing_tp_marked.png and decide whether the marked TP "
+                "belongs to the front or back locator side. The user must not choose the side."
+            ),
+            done_any_artifacts=["debug/board_side_decision.json"],
+            allowed_tools=["view_image", "record_board_side_decision"],
+            next_action_hint=(
+                "View the marked locator page. Use its TOP/BOTTOM, FRONT/BACK, page title, mirror, "
+                "silkscreen and component-layout evidence, then call record_board_side_decision."
+            ),
+        )
+        plan.insert(2, side_step)
+        plan.insert(3, WorkflowPlanStep(
+            step_id="partback_vlm_landmarks",
+            title="VLM semantic review of back-board landmarks",
+            objective=(
+                "For side=back, generate numbered locator/photo candidates, visually classify true mechanical "
+                "landmarks, and record at least two one-to-one correspondences using only IDs drawn on the sheet. "
+                "PCB corners are the primary transform; solder pads/vias are forbidden."
+            ),
+            done_any_artifacts=[
+                "debug/back_optional_candidate_classification.json",
+                "debug/back_optional_vlm_candidate_sheet.png",
+                "debug/back_vlm_landmark_review.json",
+            ],
+            allowed_tools=[
+                "prepare_back_board_landmark_candidates",
+                "view_image",
+                "record_back_landmark_review",
+            ],
+            next_action_hint=(
+                "If side=back, call prepare_back_board_landmark_candidates, inspect the combined and separate "
+                "candidate sheets, then call record_back_landmark_review with semantic evidence for each pair."
+            ),
+        ))
+        plan[-1] = WorkflowPlanStep(
+            step_id="partd_case12_align_and_finish",
+            title="Side-aware mapping and finish",
+            objective=(
+                "Read board_side_decision.json. For front, run the existing IC-anchor alignment. "
+                "For back, skip IC anchors and use outline/hole registration on back_board_photo."
+            ),
+            done_any_artifacts=["debug/step03_mapping.json", "debug/step08_final_tp.png", "debug/step08_result.json"],
+            allowed_tools=[
+                "case12_build_and_align_from_step02_anchors",
+                "emit_step08_from_case12_aligned",
+                "register_back_board_from_outline_and_holes",
+                "emit_step08_from_back_board_registration",
+                "finish",
+                "view_image",
+            ],
+            next_action_hint=(
+                "If side=back, call register_back_board_from_outline_and_holes then "
+                "emit_step08_from_back_board_registration. The registration tool requires the VLM review JSON. "
+                "If side=front, use the existing case12 IC path."
+            ),
+        )
+        return plan
 
     def _artifact_exists(self, rel: str) -> bool:
         ws = self.cfg.workspace_dir.resolve()
@@ -1147,7 +1310,30 @@ class Agent:
                 return None
         return None
 
+    def _board_side_decision(self) -> str | None:
+        ws = self.cfg.workspace_dir.resolve()
+        for path in (ws / "debug/board_side_decision.json", ws / "workspace/debug/board_side_decision.json"):
+            if not path.is_file():
+                continue
+            try:
+                side = str(json.loads(path.read_text(encoding="utf-8")).get("side", "")).strip().lower()
+                if side in {"front", "back"}:
+                    return side
+            except Exception:
+                continue
+        return None
+
     def _is_plan_step_done(self, step: WorkflowPlanStep) -> bool:
+        # Once the locator has proven the TP is on the back, the two largest-IC
+        # phases are intentionally bypassed. The back has no stable IC anchor.
+        if self._board_side_decision() == "back" and step.step_id in {
+            "partb_locator_largest_ic",
+            "parta_board_largest_ic",
+            "partback_vlm_landmarks",
+        }:
+            return True
+        if self._board_side_decision() == "front" and step.step_id == "partback_vlm_landmarks":
+            return True
         return bool(step.done_any_artifacts) and all(
             self._artifact_exists(p) for p in step.done_any_artifacts
         )
@@ -1431,6 +1617,18 @@ class Agent:
 
         current = plan_steps[plan_idx]
         allowed = list(current.allowed_tools or [])
+        side = self._board_side_decision()
+        if current.step_id == "partd_case12_align_and_finish" and side == "back":
+            allowed = [name for name in allowed if name in {
+                "register_back_board_from_outline_and_holes",
+                "emit_step08_from_back_board_registration",
+                "finish", "view_image", "read_text_file",
+            }]
+        elif current.step_id == "partd_case12_align_and_finish" and side == "front":
+            allowed = [name for name in allowed if name not in {
+                "register_back_board_from_outline_and_holes",
+                "emit_step08_from_back_board_registration",
+            }]
         if not allowed:
             return self.registry.openai_schema()
 
@@ -1452,6 +1650,16 @@ class Agent:
         current = plan_steps[plan_idx]
         current_id = current.step_id
         tool = call.name
+        side = self._board_side_decision()
+        if current_id == "partd_case12_align_and_finish" and side == "back" and tool in {
+            "case12_build_and_align_from_step02_anchors",
+            "emit_step08_from_case12_aligned",
+        }:
+            return (
+                "[side-guard] side=back: front/case12 IC-anchor tools are forbidden. "
+                "Use register_back_board_from_outline_and_holes, then "
+                "emit_step08_from_back_board_registration."
+            )
 
         # Compact workflow: Part0 quickstart is already in ## Task.
         if (
@@ -2030,6 +2238,8 @@ class Agent:
                         mm = mv.strip() or None
                 except Exception:  # noqa: BLE001
                     mm = None
+            if mm == "back_board_outline_holes":
+                return None
             if mm not in {"case12_step02_opencv_ic_align", "case12_step02_vlm_ic_align"}:
                 return (
                     "[plan-guard] Before `finish`, set `debug/step03_mapping.json` "
@@ -2245,7 +2455,11 @@ class Agent:
             return False
         if not (recent_signatures[-1] == recent_signatures[-2] == recent_signatures[-3]):
             return False
-        if call.name not in {"list_files", "read_text_file", "search_pdf_text"}:
+        if call.name not in {
+            "list_files", "read_text_file", "search_pdf_text",
+            "register_back_board_from_outline_and_holes",
+            "emit_step08_from_back_board_registration",
+        }:
             return False
         messages.append(self.client.user_message(
             "[loop-guard]\n"
@@ -2584,11 +2798,10 @@ class Agent:
             if isinstance(value, str) and Path(value).suffix.lower() in self._IMG_EXT:
                 path = Path(value)
                 if path.exists():
-                    text_context_lines.append(f"- [image] {key} = {path}")
-                    if inline_images_ok:
-                        image_parts.append(self.client.image_part(
-                            encode_image_data_url(path)
-                        ))
+                    text_context_lines.append(
+                        f"- [image-path] {key} = {path} "
+                        "(use `view_image` when this step needs visual evidence)"
+                    )
                 else:
                     text_context_lines.append(
                         f"- [image-missing] {key} = {path}"
@@ -3212,6 +3425,79 @@ class Agent:
 
         return errors
 
+    def _validate_skill_contract_back_board_registration(self, ws: Path) -> list[str]:
+        """Finish contract for the IC-free back-side geometric registration path."""
+        errors: list[str] = []
+        required = [
+            "debug/case10_signal_to_tp.json",
+            "debug/case10_target_tp_pdf_search.json",
+            "debug/case10_assembly_drawing.png",
+            "debug/case10_assembly_drawing_tp_marked.png",
+            "debug/back_board_registration.json",
+            "debug/back_board_registration_overlay.png",
+            "debug/back_01_locator_outline.png",
+            "debug/back_01_photo_outline.png",
+            "debug/back_02_reprojection_overlay.png",
+            "debug/back_02_reprojection_validation.json",
+            "debug/back_03_tp_projection.png",
+            "debug/back_04_tp_local_candidates.png",
+            "debug/back_04_tp_local_candidates.json",
+            "debug/step03_mapping.json",
+            "debug/step08_final_tp.png",
+            "debug/step08_result.json",
+        ]
+        for rel in required:
+            if self._path_first_existing([ws / rel, ws / "workspace" / rel]) is None:
+                errors.append(f"Missing required back-board artifact: {rel}")
+        registration = self._path_first_existing([
+            ws / "debug/back_board_registration.json",
+            ws / "workspace/debug/back_board_registration.json",
+        ])
+        final = self._path_first_existing([
+            ws / "debug/step08_result.json",
+            ws / "workspace/debug/step08_result.json",
+        ])
+        review_file = self._path_first_existing([
+            ws / "debug/back_vlm_landmark_review.json",
+            ws / "workspace/debug/back_vlm_landmark_review.json",
+        ])
+        if review_file is not None:
+            try:
+                review = json.loads(review_file.read_text(encoding="utf-8"))
+                if review.get("review_source") != "vlm_visual_semantic_review":
+                    errors.append("Back landmark review must come from VLM visual semantic review.")
+                matches = review.get("matches")
+                if not isinstance(matches, list) or len(matches) < 2:
+                    errors.append("Back landmark review must contain at least two semantic matches.")
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Invalid back VLM landmark review: {e}")
+        if registration is not None and final is not None:
+            try:
+                reg = json.loads(registration.read_text(encoding="utf-8"))
+                out = json.loads(final.read_text(encoding="utf-8"))
+                target = reg.get("board_roi_target_px_approx")
+                pixel = out.get("pixel")
+                if not (isinstance(target, list) and len(target) == 2):
+                    errors.append("back_board_registration.json missing board_roi_target_px_approx [x,y].")
+                elif not (isinstance(pixel, list) and len(pixel) == 2):
+                    errors.append("step08_result.json missing pixel [x,y].")
+                elif abs(float(target[0]) - float(pixel[0])) > 1.0 or abs(float(target[1]) - float(pixel[1])) > 1.0:
+                    errors.append("Back Step08 pixel must match back_board_registration target (±1px).")
+                if (
+                    int(reg.get("inlier_hole_count", 0)) < 2
+                    and reg.get("orientation_source") != "bottom_view_display_contract_tl_to_tl"
+                ):
+                    errors.append("Back registration requires at least two inlier mounting/tooling landmarks.")
+                p95 = float(reg.get("p95_landmark_error_px", float("inf")))
+                threshold = float(reg.get("landmark_acceptance_threshold_px", 0.0))
+                if threshold <= 0 or p95 > threshold:
+                    errors.append("Back registration landmark reprojection error exceeds its acceptance threshold.")
+                if float(reg.get("orientation_score_margin", 0.0)) < 0.12:
+                    errors.append("Back registration orientation remains ambiguous.")
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"Invalid back-board registration artifacts: {e}")
+        return errors
+
     def _validate_skill_contract(self) -> list[str]:
         """Check required debug artifacts before accepting finish() (no progress/*.md gate)."""
         errors: list[str] = []
@@ -3251,6 +3537,9 @@ class Agent:
             return errors
         if mapping_method_early == "case12_step02_vlm_ic_align":
             errors.extend(self._validate_skill_contract_case12_vlm_ic_align(ws))
+            return errors
+        if mapping_method_early == "back_board_outline_holes":
+            errors.extend(self._validate_skill_contract_back_board_registration(ws))
             return errors
 
         if mapping_json is None:

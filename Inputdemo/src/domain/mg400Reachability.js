@@ -126,7 +126,7 @@ export function evaluateMg400PoseReachability(poseInput, options = {}) {
     adjustedRadius = clamp(radius, rLow, rHigh);
   }
 
-  const lowZEvidenceApplies = requestedPose.z < LOW_Z_STALL_GUARD_MM && radius >= 190 && radius <= 300;
+  const lowZEvidenceApplies = requestedPose.z < 100 && radius >= 190 && radius <= 300;
   if (lowZEvidenceApplies) {
     violations.push(
       "Recent MG400 simulation evidence shows this low-Z measurement band stalls before the target: " +

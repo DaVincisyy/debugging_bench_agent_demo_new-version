@@ -26,12 +26,12 @@ PHASE_TOOL_WHITELIST: dict[str, frozenset[str]] = {
         "detect_largest_ic_on_assembly_from_vlm_hint", "annotate_image", "read_text_file",
     }),
     "parta_board_largest_ic": frozenset({
-        "run_python", "detect_largest_ic_on_board_from_vlm_hint", "view_image",
+        "run_python", "detect_largest_ic_on_board_full", "detect_largest_ic_on_board_from_vlm_hint", "view_image",
         "save_text_file", "annotate_image", "read_text_file",
     }),
     "partd_case12_align_and_finish": frozenset({
         "case12_build_and_align_from_step02_anchors", "emit_step08_from_case12_aligned",
-        "run_python", "annotate_image", "save_text_file", "finish", "view_image",
+        "run_python", "annotate_image", "save_text_file", "finish", "view_image", "read_text_file",
     }),
 }
 
@@ -89,6 +89,16 @@ _TOOL_ARG_SCHEMAS: dict[str, dict[str, Any]] = {
             "vlm_hints_path": {"type": "string"},
             "region_hint": {"type": "string", "minLength": 1},
             "work_margin_ratio": {"type": "number"},
+        },
+    },
+    "detect_largest_ic_on_board_full": {
+        "type": "object",
+        "properties": {
+            "board_path": {"type": "string"},
+            "out_debug_path": {"type": "string"},
+            "out_box_path": {"type": "string"},
+            "out_json_path": {"type": "string"},
+            "out_landscape_path": {"type": "string"},
         },
     },
     "detect_largest_ic_on_board_from_vlm_hint": {
@@ -263,20 +273,9 @@ def tool_constraints_prompt_block() -> str:
         "```",
         "",
         "### parta_board_largest_ic",
-        "- Tools: run_python, detect_largest_ic_on_board_from_vlm_hint, view_image, save_text_file, annotate_image, read_text_file",
-        "- save_text_file → debug/case10_vlm_hints.json example:",
-        "```json",
-        json.dumps(
-            {
-                "approx_bbox_norm": [0.42, 0.38, 0.58, 0.62],
-                "region_hint": "largest IC package on board photo",
-                "visual_cues": "big square QFP with readable silkscreen refdes",
-                "reference_text": "U12 or similar refdes on package",
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        "```",
+        "- Tools: run_python, detect_largest_ic_on_board_full, detect_largest_ic_on_board_from_vlm_hint, view_image, save_text_file, annotate_image, read_text_file",
+        "- Primary path: call `detect_largest_ic_on_board_full` (no VLM hints; auto PCB mask + QFP filters on full board photo).",
+        "- Optional: `view_image` on `debug/case10_largest_ic_box.png` after detection for QC.",
         "",
         "### partd_case12_align_and_finish",
         "- Tools: case12_build_and_align_from_step02_anchors, emit_step08_from_case12_aligned, run_python, annotate_image, save_text_file, finish, view_image",

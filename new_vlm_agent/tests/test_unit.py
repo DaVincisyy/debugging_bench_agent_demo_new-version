@@ -991,6 +991,55 @@ def test_vlm_test_annotate_physical_board_bbox_forbidden_circle_ok():
     set_runtime_context(root, root / "workspace", {}, workflow_mode="default")
 
 
+def test_document_ref_message_format():
+    from agent.llm_client import LLMClient
+
+    msg = LLMClient.document_ref_message("file-fe-abc123")
+    assert msg == {"role": "system", "content": "fileid://file-fe-abc123"}
+    print("OK  document_ref_message_format")
+
+
+def test_upload_extract_file_polls_until_processed():
+    from agent.config import Config
+    from agent.llm_client import LLMClient
+
+    cfg = Config(
+        base_url="http://localhost:0",
+        api_key="sk-unused",
+        model="mock",
+    )
+    client = LLMClient(cfg)
+
+    class _FileObj:
+        def __init__(self, file_id: str, status: str):
+            self.id = file_id
+            self.status = status
+
+    states = iter(["processing", "processed"])
+
+    def fake_create(**kwargs):
+        assert kwargs.get("purpose") == "file-extract"
+        return _FileObj("file-fe-test", next(states))
+
+    def fake_retrieve(file_id: str):
+        assert file_id == "file-fe-test"
+        return _FileObj(file_id, next(states, "processed"))
+
+    client._client.files.create = fake_create  # type: ignore[assignment]
+    client._client.files.retrieve = fake_retrieve  # type: ignore[assignment]
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(b"%PDF-1.4\n")
+        tmp_path = tmp.name
+
+    try:
+        file_id = client.upload_extract_file(tmp_path, poll_interval_sec=0.01)
+        assert file_id == "file-fe-test"
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+    print("OK  upload_extract_file_polls_until_processed")
+
+
 def main() -> int:
     test_missing_env_raises()
     test_tool_registry_openai_schema()
@@ -1028,6 +1077,8 @@ def main() -> int:
     test_vlm_test_run_python_regex_allows_only_vlm_symbol()
     test_vlm_test_run_python_physical_board_geometry_guard()
     test_vlm_test_annotate_physical_board_bbox_forbidden_circle_ok()
+    test_document_ref_message_format()
+    test_upload_extract_file_polls_until_processed()
     print("\nALL UNIT TESTS PASSED")
     return 0
 

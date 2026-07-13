@@ -20,6 +20,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 
 from openai import APIConnectionError, APITimeoutError, BadRequestError, OpenAI
@@ -239,6 +240,36 @@ class LLMClient:
             "type": "image_url",
             "image_url": {"url": data_url, "detail": detail},
         }
+
+    @staticmethod
+    def document_ref_message(file_id: str) -> dict[str, Any]:
+        """DashScope document reference — attach via system message, not image_url."""
+        return {"role": "system", "content": f"fileid://{file_id}"}
+
+    def upload_extract_file(
+        self,
+        path: str | Path,
+        *,
+        max_wait_sec: float = 120.0,
+        poll_interval_sec: float = 1.0,
+    ) -> str:
+        """Upload a local file for DashScope document extraction (purpose=file-extract).
+
+        Returns the provider file id to pass in ``document_ref_message``.
+        Polls until status is ``processed`` or ``max_wait_sec`` elapses.
+        """
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Document not found: {p}")
+        file_obj = self._client.files.create(file=p, purpose="file-extract")
+        file_id = file_obj.id
+        deadline = time.time() + max_wait_sec
+        status = getattr(file_obj, "status", None) or "processed"
+        while status != "processed" and time.time() < deadline:
+            time.sleep(poll_interval_sec)
+            file_obj = self._client.files.retrieve(file_id)
+            status = getattr(file_obj, "status", None) or "processed"
+        return file_id
 
     @staticmethod
     def user_message(parts: Iterable[dict[str, Any]] | str) -> dict[str, Any]:

@@ -569,7 +569,7 @@ function stripBinaryForApi(run) {
   const { nodeEvents, ...rest } = run;
   const stripped = { ...rest };
   const input = { ...run.input };
-  for (const key of ["cameraImage", "bitImage", "bitPdf", "schematicImage", "schematicPdf"]) {
+  for (const key of ["cameraImage", "cameraImageBack", "bitImage", "bitPdf", "schematicImage", "schematicPdf"]) {
     const field = input[key];
     if (field && field.dataUrl && field.dataUrl.length > 1000) {
       input[key] = { ...field, dataUrl: "[stripped:" + (field.dataUrl.length || 0) + "]" };

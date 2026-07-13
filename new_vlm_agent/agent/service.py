@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from .agent import Agent
+from .case_builder import write_inputdemo_task_yaml
 from .config import compose_agent_question, load_config, load_task
 from .planner import PlannerResult, run_planner
 
@@ -35,6 +36,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 log = logging.getLogger("vlm-agent-service")
 
 TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
+
+UPLOAD_CASES_DIR = Path(os.environ.get("VLM_AGENT_CASES_DIR", "data/cases")).resolve()
 
 
 def _final_answer_matches_target(final_answer: Any, target_point: str) -> bool:
@@ -83,6 +86,20 @@ class ObservationRequest(BaseModel):
     type: str = "observation"
     source: str = "node"
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class PrepareCaseRequest(BaseModel):
+    """Inputdemo bench case — assets already saved under case_dir."""
+
+    case_dir: str = Field(..., description="Absolute path to the case directory with asset files.")
+    instruction: str = Field(..., description="User measurement question / task instruction.")
+    case_id: str = Field(default="inputdemo-case")
+    operator: str = Field(default="unknown")
+    run_id: str | None = None
+    assets: dict[str, str | None] = Field(
+        default_factory=dict,
+        description="Map of input keys to filenames inside case_dir (e.g. front_board_photo).",
+    )
 
 
 @dataclass
@@ -290,6 +307,9 @@ class RunManager:
                 return None
 
             schematic_image = _find_input_image(["schematic_image", "schematic_pdf"])
+            # 位号图 (assembly/bit drawing) is intentionally NOT sent to the
+            # planner; it is consumed downstream by the per-TP localization
+            # steps via `inputs`.
             assembly_image = _find_input_image(["assembly_drawing", "assembly_drawing_pdf",
                                                 "bit_image", "bit_pdf"])
 
@@ -297,14 +317,13 @@ class RunManager:
                 "phase": "planner",
                 "question": user_question,
                 "schematic_image": schematic_image,
-                "assembly_image": assembly_image,
+                "assembly_image_downstream": assembly_image,
             })
 
             try:
                 planner_result = run_planner(
                     user_question=user_question,
                     schematic_image_path=schematic_image,
-                    assembly_image_path=assembly_image,
                     cfg=cfg,
                     event_sink=lambda event_type, payload: self._append_event_threadsafe(
                         run_id, event_type, payload
@@ -558,7 +577,88 @@ app.add_middleware(
 
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "service": "debugging-agent-v2"}
+    return {"ok": True, "service": "debugging-agent-v2", "case_prepare": True}
+
+
+# ------------------------------------------------------------------ #
+#  Case prepare — single source of truth for Inputdemo task.yaml
+# ------------------------------------------------------------------ #
+
+
+@app.post("/v1/cases/prepare", status_code=201)
+def prepare_case(req: PrepareCaseRequest) -> dict[str, Any]:
+    """Write task.yaml for an Inputdemo bench case (local shared filesystem)."""
+    case_dir = Path(req.case_dir).resolve()
+    if not case_dir.is_dir():
+        raise HTTPException(status_code=400, detail=f"case_dir does not exist: {case_dir}")
+    task_file = write_inputdemo_task_yaml(
+        case_dir,
+        instruction=req.instruction,
+        case_id=req.case_id,
+        operator=req.operator,
+        assets=req.assets,
+    )
+    log.info("Prepared case case_dir=%s task=%s run_id=%s", case_dir, task_file, req.run_id)
+    return {
+        "ok": True,
+        "format": "inputdemo-task",
+        "case_dir": str(case_dir),
+        "task_file": str(task_file),
+        "run_id": req.run_id,
+    }
+
+
+@app.post("/v1/cases/prepare/upload", status_code=201)
+async def prepare_case_upload(
+    instruction: str = Form(...),
+    case_id: str = Form("inputdemo-case"),
+    operator: str = Form("unknown"),
+    run_id: str | None = Form(None),
+    files: list[UploadFile] = File(default=[], description="Case asset files (images/PDFs)"),
+) -> dict[str, Any]:
+    """Upload assets and write task.yaml on the VLM server (remote Inputdemo)."""
+    safe_id = (case_id or run_id or f"case_{uuid.uuid4().hex[:12]}").strip()
+    case_dir = UPLOAD_CASES_DIR / safe_id
+    case_dir.mkdir(parents=True, exist_ok=True)
+
+    assets: dict[str, str | None] = {}
+    for upload in files or []:
+        if not upload.filename:
+            continue
+        dest = case_dir / upload.filename
+        dest.write_bytes(await upload.read())
+        lower = upload.filename.lower()
+        if lower.endswith(".pdf"):
+            if "schematic" in lower and not assets.get("schematic_pdf"):
+                assets["schematic_pdf"] = upload.filename
+            elif not assets.get("assembly_drawing_pdf"):
+                assets["assembly_drawing_pdf"] = upload.filename
+        elif any(lower.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+            if "schematic" in lower and not assets.get("schematic_image"):
+                assets["schematic_image"] = upload.filename
+            elif "back" in lower or "rear" in lower:
+                assets.setdefault("back_board_photo", upload.filename)
+            elif "front" in lower or "board" in lower or "pcba" in lower:
+                assets.setdefault("front_board_photo", upload.filename)
+            elif not assets.get("assembly_drawing"):
+                assets["assembly_drawing"] = upload.filename
+
+    task_file = write_inputdemo_task_yaml(
+        case_dir,
+        instruction=instruction,
+        case_id=case_id,
+        operator=operator,
+        assets=assets,
+    )
+    log.info("Prepared uploaded case case_id=%s dir=%s files=%d", safe_id, case_dir, len(files or []))
+    return {
+        "ok": True,
+        "format": "inputdemo-task",
+        "case_dir": str(case_dir),
+        "task_file": str(task_file),
+        "run_id": run_id or safe_id,
+        "assets": assets,
+    }
 
 
 @app.get("/version")
@@ -685,9 +785,6 @@ async def download_run_file(run_id: str, file_path: str) -> Any:
 # ------------------------------------------------------------------ #
 #  Upload endpoint (remote Node.js orchestration)
 # ------------------------------------------------------------------ #
-
-UPLOAD_CASES_DIR = Path(os.environ.get("VLM_AGENT_CASES_DIR", "data/cases")).resolve()
-
 
 @app.post("/v1/runs/upload", status_code=202)
 async def create_run_with_files(

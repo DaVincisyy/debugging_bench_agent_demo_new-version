@@ -12,6 +12,9 @@ export function parseUserCommand(payload) {
   }
 
   const cameraImage = normalizeOptionalFile(payload.Camera_image || payload.camera_image);
+  const cameraImageBack = normalizeOptionalFile(
+    payload.Camera_image_back || payload.camera_image_back || payload.cameraImageBack
+  );
   const bitImages = normalizeNamedFiles(payload.Bit_image || payload.bit_image, "bit_image");
   const schematicDiagrams = normalizeNamedFiles(
     payload.Schematic_Diagram || payload.schematic_diagram,
@@ -20,6 +23,9 @@ export function parseUserCommand(payload) {
   const legacyAttachments = normalizeAttachments(payload.modelAttachments);
   const modelAttachments = [...bitImages, ...schematicDiagrams, ...legacyAttachments];
   const context = normalizeContext(payload);
+  const targetBoardSide = normalizeBoardSide(
+    payload.Target_board_side || payload.target_board_side || payload.targetBoardSide
+  );
 
   return {
     command,
@@ -28,6 +34,8 @@ export function parseUserCommand(payload) {
     operator: context.operator,
     prompt,
     cameraImage,
+    cameraImageBack,
+    targetBoardSide,
     bitImages,
     schematicDiagrams,
     visualCapture: payload.visualCapture || (cameraImage ? {
@@ -38,6 +46,11 @@ export function parseUserCommand(payload) {
     modelAttachments,
     context
   };
+}
+
+function normalizeBoardSide(value) {
+  const side = String(value || "auto").trim().toLowerCase();
+  return ["auto", "front", "back"].includes(side) ? side : "auto";
 }
 
 function normalizePrompt(payload) {

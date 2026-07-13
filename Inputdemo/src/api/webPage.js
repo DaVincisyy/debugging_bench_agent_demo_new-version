@@ -474,7 +474,7 @@ export const webPage = String.raw`<!doctype html>
             <div class="upload-grid">
               <div class="mini-stack">
                 <div>
-                  <label for="cameraImage">Camera_image</label>
+                  <label for="cameraImage">Camera_image (正面)</label>
                   <input id="cameraImage" type="file" accept="image/*">
                 </div>
                 <div class="row">
@@ -489,8 +489,17 @@ export const webPage = String.raw`<!doctype html>
                   <canvas id="cameraCanvas" class="hidden"></canvas>
                   <img id="cameraSnapshot" class="hidden" alt="Camera snapshot">
                 </div>
-                <p class="hint">相机拍摄的 PCBA 实物图，用于 VLM 识别实物位置。</p>
+                <p class="hint">相机拍摄的 PCBA 实物图（正面），用于 VLM 识别实物位置。</p>
                 <div id="cameraImageList" class="file-list"></div>
+              </div>
+
+              <div class="mini-stack">
+                <div>
+                  <label for="cameraImageBack">Camera_image (背面)</label>
+                  <input id="cameraImageBack" type="file" accept="image/*">
+                </div>
+                <p class="hint">可选上传。平台会先从原理图确定 TP，再根据位号图自动判断正面/背面；若为背面，将使用 PCB 外框和安装/定位孔进行映射。</p>
+                <div id="cameraImageBackList" class="file-list"></div>
               </div>
 
               <div class="mini-stack">
@@ -748,6 +757,8 @@ export const webPage = String.raw`<!doctype html>
     const stopVoiceEl = document.querySelector("#stopVoice");
     const voiceStatusEl = document.querySelector("#voiceStatus");
     const cameraImageEl = document.querySelector("#cameraImage");
+    const cameraImageBackEl = document.querySelector("#cameraImageBack");
+    const cameraImageBackListEl = document.querySelector("#cameraImageBackList");
     const bitPdfEl = document.querySelector("#bitPdf");
     const bitImageEl = document.querySelector("#bitImage");
     const schematicPdfEl = document.querySelector("#schematicPdf");
@@ -1373,11 +1384,16 @@ export const webPage = String.raw`<!doctype html>
       if (capturedCameraImage) {
         const row = document.createElement("div");
         row.className = "file-row";
-        row.innerHTML = "<span>" + capturedCameraImage.name + "</span><strong class=\"badge\">Camera_image / " + fileSize(capturedCameraImage.size) + "</strong>";
+        row.innerHTML = "<span>" + capturedCameraImage.name + "</span><strong class=\"badge\">Camera_image (正面) / " + fileSize(capturedCameraImage.size) + "</strong>";
         cameraImageListEl.appendChild(row);
         return;
       }
-      renderFiles(cameraImageListEl, cameraImageEl.files, "Camera_image");
+      renderFiles(cameraImageListEl, cameraImageEl.files, "Camera_image (正面)");
+    }
+
+    function renderCameraImageBack() {
+      cameraImageBackListEl.innerHTML = "";
+      renderFiles(cameraImageBackListEl, cameraImageBackEl.files, "Camera_image (背面)");
     }
 
     async function readFile(file) {
@@ -1607,6 +1623,9 @@ export const webPage = String.raw`<!doctype html>
       cameraSnapshotEl.classList.add("hidden");
       renderCameraImage();
     });
+    cameraImageBackEl.addEventListener("change", () => {
+      renderCameraImageBack();
+    });
     openCameraEl.addEventListener("click", openCamera);
     checkCameraEl.addEventListener("click", () => checkCameraDevices().catch((error) => {
       cameraStatusEl.textContent = "设备检测失败：" + error.message;
@@ -1639,6 +1658,8 @@ export const webPage = String.raw`<!doctype html>
           Case_ID: document.querySelector("#caseId").value.trim(),
           Operator: document.querySelector("#operator").value.trim(),
           Camera_image: capturedCameraImage || await readFile(cameraImageEl.files[0]),
+          Camera_image_back: await readFile(cameraImageBackEl.files[0]),
+          Target_board_side: "auto",
           Bit_image: bit,
           Schematic_Diagram: schematic
         };

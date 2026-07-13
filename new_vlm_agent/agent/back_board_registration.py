@@ -1,0 +1,693 @@
+"""Auditable geometry-first registration for back-side PCBA localisation.
+
+Ordinary solder joints and vias are deliberately treated as *rejected*
+candidates.  Board-outline hypotheses establish scale/perspective and explicit
+mirror/rotation possibilities; mechanical holes/tooling features only choose
+and validate the correct hypothesis.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+
+def _cv():
+    import cv2  # type: ignore
+    import numpy as np  # type: ignore
+    return cv2, np
+
+
+def _load(path: str | Path):
+    cv2, _ = _cv()
+    image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError(f"cannot read image: {path}")
+    return image
+
+
+def _write(path: Path, image) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cv2, _ = _cv()
+    if not cv2.imwrite(str(path), image):
+        raise ValueError(f"cannot write debug image: {path}")
+
+
+def _json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _board_contour(image, *, domain: str):
+    cv2, np = _cv()
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    h, w = image.shape[:2]
+    if domain == "photo":
+        # Hue is unstable in dark pixels: a neutral fixture shadow can receive
+        # a nominally green HSV hue. Require actual green-channel dominance so
+        # shadows are excluded from the physical PCB silhouette.
+        blue, green, red = cv2.split(image)
+        b16 = blue.astype(np.int16)
+        g16 = green.astype(np.int16)
+        r16 = red.astype(np.int16)
+        mask = (
+            (g16 >= 45)
+            & (g16 >= r16 + 10)
+            & (g16 >= b16 + 10)
+        ).astype(np.uint8) * 255
+        scale = max(9, int(round(min(h, w) * 0.012)))
+    else:
+        # Locator PDFs are faint gray line art, occasionally with a green TP
+        # marker.  Preserve both dark strokes and saturated annotations.
+        saturated = cv2.inRange(hsv, np.array([0, 22, 15]), np.array([180, 255, 247]))
+        dark = cv2.threshold(gray, 247, 255, cv2.THRESH_BINARY_INV)[1]
+        mask = cv2.bitwise_or(saturated, dark)
+        scale = max(5, int(round(min(h, w) * 0.018)))
+    if scale % 2 == 0:
+        scale += 1
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (scale, scale))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    min_area = h * w * 0.05
+    contours = [c for c in contours if cv2.contourArea(c) >= min_area]
+    if not contours:
+        raise ValueError("PCB outline not found")
+    contour = max(contours, key=cv2.contourArea)
+    if domain == "photo":
+        contour = cv2.convexHull(contour)
+    rect = cv2.minAreaRect(contour)
+    box = cv2.boxPoints(rect).astype(np.int32)
+    rect_area = max(1.0, float(rect[1][0] * rect[1][1]))
+    rectangularity = float(cv2.contourArea(contour) / rect_area)
+    # Registration is defined by the physical PCB rectangle, not by shadow or
+    # component protrusions in the raw foreground contour.
+    filled = np.zeros(mask.shape, dtype=np.uint8)
+    cv2.fillConvexPoly(filled, box, 255)
+    x, y, bw, bh = cv2.boundingRect(contour)
+    area_ratio = float(cv2.contourArea(contour) / max(1, h * w))
+    margin = max(3, int(round(min(h, w) * 0.004)))
+    touches = bool(x <= margin and y <= margin and x + bw >= w - margin and y + bh >= h - margin)
+    min_rectangularity = 0.78 if domain == "photo" else 0.55
+    valid = bool(
+        0.08 <= area_ratio <= 0.94
+        and not touches
+        and rectangularity >= min_rectangularity
+    )
+    metrics = {
+        "domain": domain,
+        "image_size": [int(w), int(h)],
+        "bbox_xywh": [int(x), int(y), int(bw), int(bh)],
+        "area_ratio": round(area_ratio, 6),
+        "rectangularity": round(rectangularity, 6),
+        "minimum_rectangularity": min_rectangularity,
+        "touches_all_image_borders": touches,
+        "valid": valid,
+        "method": "green_channel_dominance_shadow_rejection" if domain == "photo" else "faint_line_art",
+    }
+    return contour, filled, metrics
+
+
+def _ordered_box(contour):
+    cv2, np = _cv()
+    points = cv2.boxPoints(cv2.minAreaRect(contour)).astype(np.float32)
+    center = points.mean(axis=0)
+    angles = np.arctan2(points[:, 1] - center[1], points[:, 0] - center[0])
+    points = points[np.argsort(angles)]
+    start = int(np.argmin(points[:, 0] + points[:, 1]))
+    return np.roll(points, -start, axis=0)
+
+
+def _patch_stats(gray, x: float, y: float, radius: float) -> tuple[float, float, float]:
+    cv2, np = _cv()
+    h, w = gray.shape[:2]
+    r = max(3, int(round(radius)))
+    cx, cy = int(round(x)), int(round(y))
+    x1, y1, x2, y2 = max(0, cx - 2 * r), max(0, cy - 2 * r), min(w, cx + 2 * r + 1), min(h, cy + 2 * r + 1)
+    patch = gray[y1:y2, x1:x2]
+    if patch.size == 0:
+        return 128.0, 128.0, 0.0
+    yy, xx = np.ogrid[y1:y2, x1:x2]
+    dist = np.sqrt((xx - x) ** 2 + (yy - y) ** 2)
+    inner = patch[dist <= max(2.0, radius * 0.55)]
+    ring = patch[(dist >= radius * 0.82) & (dist <= radius * 1.35)]
+    inner_mean = float(np.mean(inner)) if inner.size else 128.0
+    ring_mean = float(np.mean(ring)) if ring.size else 128.0
+    return inner_mean, ring_mean, abs(inner_mean - ring_mean)
+
+
+def _candidate_landmarks(image, board_contour, *, domain: str, max_kept: int = 12):
+    cv2, np = _cv()
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 35, 135)
+    board_mask = np.zeros(gray.shape, dtype=np.uint8)
+    cv2.drawContours(board_mask, [board_contour], -1, 255, thickness=-1)
+    edges = cv2.bitwise_and(edges, board_mask)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    _, _, bw, bh = cv2.boundingRect(board_contour)
+    board_diag = max(1.0, math.hypot(bw, bh))
+    raw: list[dict[str, Any]] = []
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        perimeter = float(cv2.arcLength(contour, True))
+        if area < 30 or perimeter <= 0:
+            continue
+        circularity = 4.0 * math.pi * area / (perimeter * perimeter)
+        if circularity < 0.48:
+            continue
+        (x, y), radius = cv2.minEnclosingCircle(contour)
+        radius_norm = float(radius) / board_diag
+        if not (0.002 <= radius_norm <= 0.10):
+            continue
+        if cv2.pointPolygonTest(board_contour, (float(x), float(y)), False) < 0:
+            continue
+        inner, ring, contrast = _patch_stats(gray, x, y, radius)
+        edge_distance = abs(float(cv2.pointPolygonTest(board_contour, (float(x), float(y)), True))) / board_diag
+        size_score = max(0.0, min(1.0, (radius_norm - 0.0045) / 0.018))
+        round_score = max(0.0, min(1.0, (circularity - 0.52) / 0.40))
+        contrast_score = max(0.0, min(1.0, contrast / 90.0))
+        if domain == "photo":
+            # A real opening usually exposes a dark, low-detail interior. Bright
+            # filled centres are typical solder/copper pads and are penalised.
+            opening_score = max(0.0, min(1.0, (145.0 - inner) / 115.0))
+        else:
+            # Drawings commonly show a white opening bounded by a dark ring.
+            opening_score = max(0.0, min(1.0, (inner - ring) / 100.0))
+        edge_prior = 1.0 if edge_distance <= 0.16 else 0.35
+        score = 0.28 * size_score + 0.20 * round_score + 0.20 * contrast_score + 0.24 * opening_score + 0.08 * edge_prior
+        reasons: list[str] = []
+        if radius_norm < 0.006:
+            reasons.append("too_small_likely_pad_or_via")
+        if circularity < 0.62:
+            reasons.append("weak_circularity")
+        if domain == "photo" and inner > 150:
+            reasons.append("bright_filled_center_likely_solder_pad")
+        if contrast < 16:
+            reasons.append("no_clear_hole_ring")
+        accepted = score >= 0.52 and radius_norm >= 0.006 and not (domain == "photo" and inner > 175)
+        raw.append({
+            "x": float(x), "y": float(y), "radius": float(radius),
+            "radius_norm": radius_norm, "circularity": circularity,
+            "inner_gray": inner, "ring_gray": ring, "ring_contrast": contrast,
+            "edge_distance_norm": edge_distance, "mechanical_score": score,
+            "accepted": bool(accepted),
+            "classification": "mechanical_hole_candidate" if accepted else "rejected_pad_via_or_unknown",
+            "rejection_reasons": reasons if reasons else ([] if accepted else ["low_mechanical_score"]),
+        })
+    # Merge duplicate inner/outer contours around the same physical feature.
+    raw.sort(key=lambda c: c["mechanical_score"], reverse=True)
+    merged: list[dict[str, Any]] = []
+    for item in raw:
+        if any((item["x"] - old["x"]) ** 2 + (item["y"] - old["y"]) ** 2 < (0.55 * max(item["radius"], old["radius"])) ** 2 for old in merged):
+            continue
+        merged.append(item)
+    accepted = [item for item in merged if item["accepted"]][:max_kept]
+    rejected = [item for item in merged if not item["accepted"]][:40]
+    accepted_prefix = "P" if domain == "photo" else "L"
+    rejected_prefix = "PR" if domain == "photo" else "LR"
+    for prefix, items in ((accepted_prefix, accepted), (rejected_prefix, rejected)):
+        for index, item in enumerate(items, 1):
+            item["id"] = f"{prefix}{index}"
+    return accepted, rejected
+
+
+def _outline_iou(locator_mask, board_mask, homography) -> float:
+    cv2, np = _cv()
+    h, w = board_mask.shape[:2]
+    warped = cv2.warpPerspective(locator_mask, homography, (w, h), flags=cv2.INTER_NEAREST)
+    intersection = int(np.count_nonzero((warped > 0) & (board_mask > 0)))
+    union = int(np.count_nonzero((warped > 0) | (board_mask > 0)))
+    return float(intersection / union) if union else 0.0
+
+
+def _match_landmarks(locator, board, homography, board_diag: float):
+    cv2, np = _cv()
+    if not locator or not board:
+        return [], board_diag
+    src = np.float32([[[item["x"], item["y"]] for item in locator]])
+    projected = cv2.perspectiveTransform(src, homography)[0]
+    threshold = max(12.0, board_diag * 0.035)
+    candidates: list[tuple[float, int, int, float]] = []
+    for li, point in enumerate(projected):
+        for bi, target in enumerate(board):
+            distance = float(np.linalg.norm(point - np.float32([target["x"], target["y"]])))
+            radius_penalty = abs(math.log(max(locator[li]["radius_norm"], 1e-5) / max(target["radius_norm"], 1e-5)))
+            cost = distance + threshold * 0.35 * min(radius_penalty, 2.0)
+            if distance <= threshold:
+                candidates.append((cost, li, bi, distance))
+    pairs: list[dict[str, Any]] = []
+    used_l: set[int] = set()
+    used_b: set[int] = set()
+    for _, li, bi, distance in sorted(candidates):
+        if li in used_l or bi in used_b:
+            continue
+        used_l.add(li)
+        used_b.add(bi)
+        pairs.append({
+            "locator_id": locator[li]["id"], "board_id": board[bi]["id"],
+            "locator_px": [locator[li]["x"], locator[li]["y"]],
+            "board_px": [board[bi]["x"], board[bi]["y"]],
+            "projected_px": [float(projected[li][0]), float(projected[li][1])],
+            "error_px": distance,
+        })
+    return pairs, threshold
+
+
+def _hypotheses(locator_corners, board_corners, locator_mask, board_mask, locator_landmarks, board_landmarks):
+    cv2, np = _cv()
+    _, _, bw, bh = cv2.boundingRect(np.int32(board_corners))
+    diag = max(1.0, math.hypot(bw, bh))
+    results: list[dict[str, Any]] = []
+    for mirrored in (False, True):
+        base = board_corners.copy()
+        if mirrored:
+            base = base[[0, 3, 2, 1]]
+        for rotation in range(4):
+            destination = np.roll(base, -rotation, axis=0).astype(np.float32)
+            matrix = cv2.getPerspectiveTransform(locator_corners.astype(np.float32), destination)
+            pairs, threshold = _match_landmarks(locator_landmarks, board_landmarks, matrix, diag)
+            errors = [pair["error_px"] for pair in pairs]
+            mean_error = float(sum(errors) / len(errors)) if errors else threshold * 2.0
+            iou = _outline_iou(locator_mask, board_mask, matrix)
+            score = 2.4 * len(pairs) + 4.0 * iou - min(mean_error / threshold, 2.0)
+            results.append({
+                "rotation_quadrants": rotation, "mirrored": mirrored,
+                "outline_iou": iou, "pair_count": len(pairs),
+                "mean_error_px": mean_error, "matching_threshold_px": threshold,
+                "score": score, "pairs": pairs, "matrix": matrix,
+            })
+    results.sort(key=lambda item: item["score"], reverse=True)
+    return results
+
+
+def _reviewed_hypotheses(locator_corners, board_corners, locator_mask, board_mask, locator_candidates, board_candidates, review_matches):
+    """Evaluate orientation hypotheses against exact correspondences chosen by the VLM."""
+    cv2, np = _cv()
+    locator_by_id = {item["id"]: item for item in locator_candidates}
+    board_by_id = {item["id"]: item for item in board_candidates}
+    resolved: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    for match in review_matches:
+        locator_item = locator_by_id.get(str(match.get("locator_id", "")))
+        board_item = board_by_id.get(str(match.get("board_id", "")))
+        if locator_item is None or board_item is None:
+            raise ValueError(
+                f"VLM review references unknown candidate pair: {match.get('locator_id')} -> {match.get('board_id')}"
+            )
+        landmark_type = str(match.get("landmark_type", "")).strip().lower()
+        if landmark_type not in {"mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"}:
+            raise ValueError(f"unsupported VLM landmark type: {landmark_type or 'missing'}")
+        if float(match.get("confidence", 0.0)) < 0.55:
+            raise ValueError(f"VLM landmark pair confidence below 0.55: {locator_item['id']} -> {board_item['id']}")
+        resolved.append((locator_item, board_item, match))
+    if len(resolved) < 2:
+        raise ValueError("VLM review must provide at least two reliable landmark correspondences")
+    _, _, bw, bh = cv2.boundingRect(np.int32(board_corners))
+    diag = max(1.0, math.hypot(bw, bh))
+    threshold = max(12.0, diag * 0.035)
+    results: list[dict[str, Any]] = []
+    for mirrored in (False, True):
+        base = board_corners.copy()
+        if mirrored:
+            base = base[[0, 3, 2, 1]]
+        for rotation in range(4):
+            destination = np.roll(base, -rotation, axis=0).astype(np.float32)
+            matrix = cv2.getPerspectiveTransform(locator_corners.astype(np.float32), destination)
+            pairs: list[dict[str, Any]] = []
+            inlier_count = 0
+            weighted_error = 0.0
+            total_weight = 0.0
+            for locator_item, board_item, semantic in resolved:
+                source = np.float32([[[locator_item["x"], locator_item["y"]]]])
+                projected = cv2.perspectiveTransform(source, matrix)[0, 0]
+                distance = float(np.linalg.norm(projected - np.float32([board_item["x"], board_item["y"]])))
+                confidence = float(semantic.get("confidence", 0.0))
+                if distance <= threshold:
+                    inlier_count += 1
+                weighted_error += min(distance, threshold * 4.0) * confidence
+                total_weight += confidence
+                pairs.append({
+                    "locator_id": locator_item["id"], "board_id": board_item["id"],
+                    "landmark_type": semantic.get("landmark_type"),
+                    "vlm_confidence": confidence, "vlm_evidence": semantic.get("evidence", ""),
+                    "locator_px": [locator_item["x"], locator_item["y"]],
+                    "board_px": [board_item["x"], board_item["y"]],
+                    "projected_px": [float(projected[0]), float(projected[1])],
+                    "error_px": distance, "inlier": bool(distance <= threshold),
+                })
+            mean_error = weighted_error / max(total_weight, 1e-6)
+            iou = _outline_iou(locator_mask, board_mask, matrix)
+            score = 3.2 * inlier_count + 4.0 * iou - min(mean_error / threshold, 3.0)
+            results.append({
+                "rotation_quadrants": rotation, "mirrored": mirrored,
+                "outline_iou": iou, "pair_count": inlier_count,
+                "reviewed_pair_count": len(resolved),
+                "mean_error_px": mean_error, "matching_threshold_px": threshold,
+                "score": score, "pairs": pairs, "matrix": matrix,
+            })
+    results.sort(key=lambda item: item["score"], reverse=True)
+    return results
+
+
+def _green_tp(image):
+    cv2, np = _cv()
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, np.array([40, 90, 90]), np.array([90, 255, 255]))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        raise ValueError("green TP marker not found on locator image")
+    contour = max(contours, key=cv2.contourArea)
+    moments = cv2.moments(contour)
+    if moments["m00"] == 0:
+        raise ValueError("green TP marker has invalid centroid")
+    return float(moments["m10"] / moments["m00"]), float(moments["m01"] / moments["m00"])
+
+
+def _draw_outline(image, contour, corners, label: str):
+    cv2, np = _cv()
+    out = image.copy()
+    # Thin orange = raw segmentation evidence, never used directly as the
+    # mapping boundary. Thick green = the strict rectangle actually used.
+    cv2.drawContours(out, [contour], -1, (0, 165, 255), 1)
+    rectangle = np.round(corners).astype(np.int32).reshape((-1, 1, 2))
+    cv2.polylines(out, [rectangle], True, (0, 255, 0), 4, cv2.LINE_AA)
+    for index, (x, y) in enumerate(corners):
+        cv2.circle(out, (int(x), int(y)), 10, (0, 0, 255), -1)
+        cv2.putText(out, f"C{index}", (int(x) + 8, int(y) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+    cv2.putText(out, label, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 0, 0), 2)
+    cv2.putText(out, "GREEN=mapping rectangle  ORANGE=raw segmentation", (20, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (0, 120, 0), 2)
+    return out
+
+
+def _draw_candidates(image, accepted, rejected, label: str):
+    cv2, _ = _cv()
+    out = image.copy()
+    for item in rejected:
+        x, y, r = int(item["x"]), int(item["y"]), max(3, int(item["radius"]))
+        cv2.circle(out, (x, y), r, (120, 120, 120), 1)
+        cv2.putText(out, item["id"], (x + r, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (90, 90, 90), 1)
+    for item in accepted:
+        x, y, r = int(item["x"]), int(item["y"]), max(4, int(item["radius"]))
+        cv2.circle(out, (x, y), r, (0, 220, 0), 3)
+        cv2.putText(out, f"{item['id']} {item['mechanical_score']:.2f}", (x + r, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 150, 0), 2)
+    cv2.putText(out, label, (20, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 0, 0), 2)
+    return out
+
+
+def _side_by_side(left, right):
+    cv2, np = _cv()
+    height = max(left.shape[0], right.shape[0])
+    def resize(image):
+        scale = height / image.shape[0]
+        return cv2.resize(image, (int(round(image.shape[1] * scale)), height))
+    return np.hstack([resize(left), resize(right)])
+
+
+def _comparison(locator_image, board_image, locator_candidates, board_candidates, pairs):
+    cv2, _ = _cv()
+    left = _draw_candidates(locator_image, locator_candidates, [], "LOCATOR accepted mechanical landmarks")
+    right = _draw_candidates(board_image, board_candidates, [], "PHOTO accepted mechanical landmarks")
+    canvas = _side_by_side(left, right)
+    right_offset = int(round(left.shape[1] * (canvas.shape[0] / left.shape[0])))
+    left_scale = canvas.shape[0] / locator_image.shape[0]
+    right_scale = canvas.shape[0] / board_image.shape[0]
+    for index, pair in enumerate(pairs, 1):
+        lx, ly = pair["locator_px"]
+        bx, by = pair["board_px"]
+        p1 = (int(lx * left_scale), int(ly * left_scale))
+        p2 = (right_offset + int(bx * right_scale), int(by * right_scale))
+        color = ((37 * index) % 255, (97 * index) % 255, (173 * index) % 255)
+        cv2.line(canvas, p1, p2, color, 2)
+        cv2.putText(canvas, f"P{index}", p1, cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+        cv2.putText(canvas, f"P{index}", p2, cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    return canvas
+
+
+def _local_tp_refinement(board, projected_x: float, projected_y: float):
+    """Use solder pads only as a tightly gated *local* verification step."""
+    cv2, np = _cv()
+    h, w = board.shape[:2]
+    diagonal = math.hypot(w, h)
+    roi_radius = max(70, int(round(diagonal * 0.055)))
+    x1, y1 = max(0, int(projected_x) - roi_radius), max(0, int(projected_y) - roi_radius)
+    x2, y2 = min(w, int(projected_x) + roi_radius), min(h, int(projected_y) + roi_radius)
+    roi = board[y1:y2, x1:x2]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 35, 140)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    candidates: list[dict[str, Any]] = []
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        perimeter = float(cv2.arcLength(contour, True))
+        if area < 18 or perimeter <= 0:
+            continue
+        circularity = 4.0 * math.pi * area / (perimeter * perimeter)
+        if circularity < 0.50:
+            continue
+        (cx, cy), radius = cv2.minEnclosingCircle(contour)
+        if not (3.0 <= radius <= diagonal * 0.022):
+            continue
+        gx, gy = float(x1 + cx), float(y1 + cy)
+        distance = math.hypot(gx - projected_x, gy - projected_y)
+        candidates.append({
+            "x": gx, "y": gy, "radius": float(radius),
+            "circularity": circularity, "distance_to_projection_px": distance,
+        })
+    candidates.sort(key=lambda item: (item["distance_to_projection_px"], -item["circularity"]))
+    # Merge duplicate inner/outer contours.
+    unique: list[dict[str, Any]] = []
+    for item in candidates:
+        if any((item["x"] - old["x"]) ** 2 + (item["y"] - old["y"]) ** 2 < (0.65 * max(item["radius"], old["radius"])) ** 2 for old in unique):
+            continue
+        unique.append(item)
+    unique = unique[:24]
+    selected = unique[0] if unique else None
+    snap_limit = max(8.0, diagonal * 0.010)
+    distinct = bool(selected) and (len(unique) == 1 or unique[1]["distance_to_projection_px"] >= max(12.0, selected["distance_to_projection_px"] * 1.55))
+    snapped = bool(selected and selected["distance_to_projection_px"] <= snap_limit and distinct)
+    final_x = float(selected["x"]) if snapped else float(projected_x)
+    final_y = float(selected["y"]) if snapped else float(projected_y)
+    overlay = board.copy()
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 165, 255), 2)
+    for index, item in enumerate(unique, 1):
+        color = (0, 220, 0) if snapped and item is selected else (255, 180, 0)
+        cv2.circle(overlay, (int(item["x"]), int(item["y"])), max(4, int(item["radius"])), color, 2)
+        cv2.putText(overlay, f"C{index}", (int(item["x"]) + 5, int(item["y"])), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+    cv2.drawMarker(overlay, (int(projected_x), int(projected_y)), (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+    cv2.drawMarker(overlay, (int(final_x), int(final_y)), (0, 180, 0) if snapped else (0, 0, 255), cv2.MARKER_TILTED_CROSS, 34, 3)
+    evidence = {
+        "projection_px": [round(projected_x, 3), round(projected_y, 3)],
+        "roi_bbox": [x1, y1, x2, y2],
+        "snap_limit_px": round(snap_limit, 3),
+        "candidate_count": len(unique),
+        "candidates": unique,
+        "selected_candidate": selected,
+        "selected_is_distinct": distinct,
+        "snapped": snapped,
+        "final_px": [round(final_x, 3), round(final_y, 3)],
+        "policy": "Solder pads are forbidden as global anchors; nearest distinct pad may refine only inside the projected TP ROI.",
+    }
+    return final_x, final_y, evidence, overlay
+
+
+def prepare_landmark_review(locator_path: str | Path, board_path: str | Path, debug_dir: str | Path) -> dict[str, Any]:
+    """Generate numbered candidate sheets for mandatory VLM semantic review."""
+    locator = _load(locator_path)
+    board = _load(board_path)
+    locator_contour, _, locator_outline = _board_contour(locator, domain="locator")
+    board_contour, _, board_outline = _board_contour(board, domain="photo")
+    locator_corners = _ordered_box(locator_contour)
+    board_corners = _ordered_box(board_contour)
+    loc_ok, loc_rejected = _candidate_landmarks(locator, locator_contour, domain="locator")
+    brd_ok, brd_rejected = _candidate_landmarks(board, board_contour, domain="photo")
+    debug = Path(debug_dir)
+    debug.mkdir(parents=True, exist_ok=True)
+    _write(debug / "back_01_locator_outline.png", _draw_outline(locator, locator_contour, locator_corners, "LOCATOR PCB outline"))
+    _write(debug / "back_01_photo_outline.png", _draw_outline(board, board_contour, board_corners, "PHOTO PCB outline"))
+    _json(debug / "back_01_outline_metrics.json", {
+        "locator_corners": locator_corners.tolist(), "photo_corners": board_corners.tolist(),
+        "locator_quality": locator_outline, "photo_quality": board_outline,
+    })
+    if not locator_outline["valid"] or not board_outline["valid"]:
+        raise ValueError(
+            "PCB outline quality gate failed; inspect back_01_*_outline.png and back_01_outline_metrics.json"
+        )
+    locator_sheet = _draw_candidates(locator, loc_ok, loc_rejected, "LOCATOR candidates: green=CV probable, gray=CV rejected")
+    board_sheet = _draw_candidates(board, brd_ok, brd_rejected, "PHOTO candidates: green=CV probable, gray=CV rejected")
+    _write(debug / "back_optional_locator_candidates.png", locator_sheet)
+    _write(debug / "back_optional_photo_candidates.png", board_sheet)
+    pair_sheet = _side_by_side(locator_sheet, board_sheet)
+    _write(debug / "back_optional_vlm_candidate_sheet.png", pair_sheet)
+    payload = {
+        "instruction": (
+            "VLM must classify candidates semantically and match only stable mechanical landmarks. "
+            "Ordinary solder pads, vias and TP pads are forbidden as global anchors."
+        ),
+        "locator": {"accepted_by_cv": loc_ok, "rejected_by_cv": loc_rejected},
+        "photo": {"accepted_by_cv": brd_ok, "rejected_by_cv": brd_rejected},
+    }
+    _json(debug / "back_optional_candidate_classification.json", payload)
+    return {
+        "locator_candidate_count": len(loc_ok) + len(loc_rejected),
+        "photo_candidate_count": len(brd_ok) + len(brd_rejected),
+        "candidate_sheet": str(debug / "back_optional_vlm_candidate_sheet.png"),
+        "candidate_json": str(debug / "back_optional_candidate_classification.json"),
+    }
+
+
+def register(
+    locator_path: str | Path,
+    board_path: str | Path,
+    debug_dir: str | Path | None = None,
+    review_path: str | Path | None = None,
+) -> dict[str, Any]:
+    cv2, np = _cv()
+    locator = _load(locator_path)
+    board = _load(board_path)
+    locator_contour, locator_mask, locator_outline = _board_contour(locator, domain="locator")
+    board_contour, board_mask, board_outline = _board_contour(board, domain="photo")
+    if not locator_outline["valid"] or not board_outline["valid"]:
+        raise ValueError("PCB outline quality gate failed before registration")
+    locator_corners = _ordered_box(locator_contour)
+    board_corners = _ordered_box(board_contour)
+    review_file = Path(review_path) if review_path is not None else None
+    review: dict[str, Any] = {}
+    review_matches: list[dict[str, Any]] = []
+    hypotheses: list[dict[str, Any]] = []
+    loc_ok: list[dict[str, Any]] = []
+    loc_rejected: list[dict[str, Any]] = []
+    brd_ok: list[dict[str, Any]] = []
+    brd_rejected: list[dict[str, Any]] = []
+    if review_file is not None and review_file.is_file():
+        loc_ok, loc_rejected = _candidate_landmarks(locator, locator_contour, domain="locator")
+        brd_ok, brd_rejected = _candidate_landmarks(board, board_contour, domain="photo")
+        review = json.loads(review_file.read_text(encoding="utf-8"))
+        if review.get("review_source") == "vlm_visual_semantic_review" and isinstance(review.get("matches"), list):
+            review_matches = review["matches"]
+            hypotheses = _reviewed_hypotheses(
+                locator_corners, board_corners, locator_mask, board_mask,
+                loc_ok + loc_rejected, brd_ok + brd_rejected, review_matches,
+            )
+    best = hypotheses[0] if hypotheses else None
+    score_margin = float(best["score"] - hypotheses[1]["score"]) if len(hypotheses) >= 2 else 0.0
+    orientation_source = "vlm_mechanical_landmarks"
+    if best is None or best["pair_count"] < 2 or score_margin < 0.12:
+        # First-principles fallback: four rectangle corners define the
+        # homography.  For ASSEMBLY_BOTTOM and a directly viewed back photo,
+        # use the explicit display-orientation contract (TL->TL, no mirror).
+        matrix = cv2.getPerspectiveTransform(
+            locator_corners.astype(np.float32), board_corners.astype(np.float32)
+        )
+        best = {
+            "rotation_quadrants": 0,
+            "mirrored": False,
+            "outline_iou": _outline_iou(locator_mask, board_mask, matrix),
+            "pair_count": 0,
+            "reviewed_pair_count": len(review_matches),
+            "mean_error_px": 0.0,
+            "matching_threshold_px": max(12.0, math.hypot(w := board.shape[1], h := board.shape[0]) * 0.035),
+            "score": 0.0,
+            "pairs": [],
+            "matrix": matrix,
+        }
+        score_margin = 1.0
+        orientation_source = "bottom_view_display_contract_tl_to_tl"
+        hypotheses.insert(0, best)
+    matrix = best["matrix"]
+    tx, ty = _green_tp(locator)
+    projected = cv2.perspectiveTransform(np.float32([[[tx, ty]]]), matrix)[0, 0]
+    h, w = board.shape[:2]
+    projected_x = float(np.clip(projected[0], 0, w - 1))
+    projected_y = float(np.clip(projected[1], 0, h - 1))
+    px, py, local_evidence, local_overlay = _local_tp_refinement(board, projected_x, projected_y)
+    errors = [float(pair["error_px"]) for pair in best["pairs"]]
+    p95 = float(np.percentile(errors, 95)) if errors else 0.0
+    threshold = float(best["matching_threshold_px"])
+    confidence = max(0.0, min(0.95,
+        0.18 + 0.10 * best["pair_count"] + 0.28 * best["outline_iou"]
+        + min(score_margin, 2.0) * 0.08 - min(p95 / max(threshold, 1.0), 2.0) * 0.16
+    ))
+    result: dict[str, Any] = {
+        "source": "back_board_outline_mechanical_landmarks_homography",
+        "mapping_method": "back_board_outline_holes",
+        "board_roi_target_px_approx": [round(px, 3), round(py, 3)],
+        "board_roi_target_px_before_local_refine": [round(projected_x, 3), round(projected_y, 3)],
+        "tp_locator_center": [round(tx, 3), round(ty, 3)],
+        "homography_3x3": [[round(float(value), 9) for value in row] for row in matrix.tolist()],
+        "orientation": {"rotation_quadrants": best["rotation_quadrants"], "mirrored": best["mirrored"]},
+        "orientation_source": orientation_source,
+        "outline_iou": round(float(best["outline_iou"]), 4),
+        "inlier_hole_count": int(best["pair_count"]),
+        "mean_hole_error_px": round(float(best["mean_error_px"]), 3),
+        "p95_landmark_error_px": round(p95, 3),
+        "landmark_acceptance_threshold_px": round(threshold, 3),
+        "orientation_score_margin": round(score_margin, 4),
+        "confidence": round(float(confidence), 3),
+        "landmark_pairs": best["pairs"],
+        "locator_accepted_count": len(loc_ok), "photo_accepted_count": len(brd_ok),
+        "locator_rejected_count": len(loc_rejected), "photo_rejected_count": len(brd_rejected),
+        "image_size": [int(w), int(h)],
+        "local_tp_verification": local_evidence,
+        "vlm_landmark_review": {
+            "review_path": str(review_file) if review_file is not None and review_file.is_file() else None,
+            "overall_evidence": review.get("overall_evidence", ""),
+            "reviewed_match_count": len(review_matches),
+            "optional": True,
+        },
+    }
+
+    if debug_dir is not None:
+        debug = Path(debug_dir)
+        debug.mkdir(parents=True, exist_ok=True)
+        locator_outline_image = _draw_outline(locator, locator_contour, locator_corners, "LOCATOR PCB outline")
+        board_outline_image = _draw_outline(board, board_contour, board_corners, "PHOTO PCB outline")
+        _write(debug / "back_01_locator_outline.png", locator_outline_image)
+        _write(debug / "back_01_photo_outline.png", board_outline_image)
+        _json(debug / "back_01_outline_metrics.json", {
+            "locator_corners": locator_corners.tolist(), "photo_corners": board_corners.tolist(),
+            "locator_quality": locator_outline, "photo_quality": board_outline,
+            "selected_outline_iou": best["outline_iou"],
+        })
+        if review_matches:
+            locator_candidates = _draw_candidates(locator, loc_ok, loc_rejected, "LOCATOR landmark classification")
+            board_candidates = _draw_candidates(board, brd_ok, brd_rejected, "PHOTO landmark classification")
+            _write(debug / "back_optional_landmark_comparison.png", _comparison(locator, board, loc_ok, brd_ok, best["pairs"]))
+            _json(debug / "back_optional_landmark_pairs.json", {"pairs": best["pairs"]})
+            _write(debug / "back_optional_locator_candidates.png", locator_candidates)
+            _write(debug / "back_optional_photo_candidates.png", board_candidates)
+        warped = cv2.warpPerspective(locator, matrix, (w, h))
+        reprojection = cv2.addWeighted(board, 0.65, warped, 0.35, 0)
+        for pair in best["pairs"]:
+            bx, by = map(int, pair["board_px"])
+            px2, py2 = map(int, pair["projected_px"])
+            cv2.line(reprojection, (bx, by), (px2, py2), (0, 0, 255), 2)
+        _write(debug / "back_02_reprojection_overlay.png", reprojection)
+        _json(debug / "back_02_reprojection_validation.json", {
+            "note": "Landmarks choose/validate an outline-derived transform; errors are independent of the four outline corners.",
+            "errors_px": errors, "mean_error_px": best["mean_error_px"], "p95_error_px": p95,
+            "threshold_px": threshold, "passed": bool(p95 <= threshold and score_margin >= 0.12),
+        })
+        projection = board.copy()
+        cv2.drawMarker(projection, (int(round(px)), int(round(py))), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
+        cv2.circle(projection, (int(round(px)), int(round(py))), max(30, int(0.025 * math.hypot(w, h))), (0, 165, 255), 2)
+        cv2.putText(projection, "Projected TP - requires local pad verification", (max(5, int(px) + 20), max(28, int(py) - 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+        _write(debug / "back_03_tp_projection.png", projection)
+        _write(debug / "back_04_tp_local_candidates.png", local_overlay)
+        _json(debug / "back_04_tp_local_candidates.json", local_evidence)
+        _json(debug / "back_registration_summary.json", result)
+    return result
+
+
+def draw_overlay(board_path: str | Path, result: dict[str, Any], output_path: str | Path) -> None:
+    cv2, _ = _cv()
+    image = _load(board_path)
+    for pair in result.get("landmark_pairs", []):
+        x, y = pair["board_px"]
+        cv2.circle(image, (int(round(x)), int(round(y))), 12, (255, 180, 0), 2)
+    target = result["board_roi_target_px_approx"]
+    x, y = int(round(target[0])), int(round(target[1]))
+    cv2.drawMarker(image, (x, y), (0, 0, 255), cv2.MARKER_CROSS, 36, 3)
+    cv2.putText(image, "TP (back registration)", (max(0, x + 18), max(24, y - 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
+    _write(Path(output_path), image)

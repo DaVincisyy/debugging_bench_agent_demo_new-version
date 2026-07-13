@@ -1,9 +1,11 @@
-"""Planner: one VLM call with inline images to decide target TPs.
+"""Planner: one VLM call over the user instruction + schematic to decide TPs.
 
 Inputs:
   - user_question: e.g. "测输入电压是否正常"
-  - schematic_image: PNG/JPG of the schematic diagram
-  - assembly_image: PNG/JPG of the 位号图
+  - schematic_image: schematic diagram (原理图). For PDF inputs, every page is
+    rasterized to compressed JPEG and sent to the planner VLM (default
+    ``qwen3.6-plus`` on the Coding endpoint). The 位号图 is NOT used here —
+    it is handed to the downstream localization steps together with the TPs.
 
 Output:
   PlannerResult(target_points=["TP1", "TP6"])
@@ -12,26 +14,35 @@ Output:
 from __future__ import annotations
 
 import json
+import mimetypes
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import os
 
 from PIL import Image
 
 from .config import Config
 from .llm_client import LLMClient
-from .utils import encode_image_data_url
 
 
-# Max dimension for planner inline images (pixels). Resize larger images
-# so base64 data URLs stay well under API request-size limits.
-PLANNER_IMAGE_MAX_DIM = 1024
+PLANNER_PDF_DPI = int(os.environ.get("PLANNER_PDF_DPI", "150"))
+
+# Per-page pixel budget. Pages larger than this are downscaled. Kept modest
+# so a multi-page schematic stays well within request-size / latency limits.
+PLANNER_MAX_PIXELS = int(os.environ.get("PLANNER_MAX_PIXELS", str(2_000_000)))
+
+# JPEG quality for the compressed schematic pages sent to the planner.
+PLANNER_JPEG_QUALITY = int(os.environ.get("PLANNER_JPEG_QUALITY", "85"))
+PLANNER_MODEL = os.environ.get("PLANNER_MODEL") or os.environ.get("VLM_MODEL", "qwen3.6-plus")
 
 
 PLANNER_SYSTEM_PROMPT = """\
 You are a test-point planner for a PCBA test system.
-Your ONLY job: look at the schematic image and find physical TP reference designators.
+Your ONLY job: read the schematic document and find physical TP reference designators.
 
 CRITICAL RULE — voltage/electrical measurements ALWAYS need 2 points:
 - One for the signal being measured (positive probe)
@@ -41,7 +52,7 @@ Even if only one net is named in the request, you MUST find:
   (b) the nearest physical TP connected to GND/return.
 
 How to find TPs:
-1. Look at the schematic image.
+1. Read the schematic document carefully.
 2. Find TP labels like "TP1", "TP12", "TP415" next to test pads.
 3. For the signal: trace the net mentioned in the request → find the TP on it.
 4. For GND: look for a TP near a GND symbol or ground plane.
@@ -64,7 +75,7 @@ You MUST find TWO physical TP reference designators (TPxxx format):
 1. The TP on the signal net being measured
 2. A GND/return reference TP
 
-Look at the schematic image NOW. Find TP labels. Output ONLY the JSON."""
+Read the schematic document NOW. Find TP labels. Output ONLY the JSON."""
 
 
 @dataclass
@@ -72,74 +83,103 @@ class PlannerResult:
     target_points: list[str]
 
 
-def _ensure_image(path_str: str) -> str | None:
-    """Return the path if it's already an image; render first page if it's a PDF."""
-    p = Path(path_str)
-    if not p.exists():
-        return None
-    ext = p.suffix.lower()
-    if ext in {".png", ".jpg", ".jpeg", ".bmp", ".webp"}:
-        return str(p)
-    if ext == ".pdf":
-        return _render_pdf_first_page(p)
-    return None
+def _pdf_page_cache_dir(pdf_path: Path, dpi: int) -> Path:
+    """Writable per-PDF cache dir for rasterized pages.
+
+    Rendered pages are written here (NOT next to the source PDF, whose
+    directory may be read-only). Keyed by absolute path + mtime + dpi so a
+    changed PDF re-renders instead of serving stale pages.
+    """
+    import hashlib
+    import tempfile
+
+    try:
+        mtime = int(pdf_path.stat().st_mtime)
+    except OSError:
+        mtime = 0
+    key = hashlib.sha1(f"{pdf_path.resolve()}|{mtime}|{dpi}".encode()).hexdigest()[:16]
+    d = Path(tempfile.gettempdir()) / "planner_pdf_pages" / key
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
-def _render_pdf_first_page(pdf_path: Path) -> str | None:
-    """Render page 0 of a PDF to a temp PNG. Returns the PNG path."""
-    out = pdf_path.with_suffix(".page0.png")
-    if out.exists():
-        return str(out)
+def _render_pdf_all_pages(pdf_path: Path, dpi: int = PLANNER_PDF_DPI) -> list[str]:
+    """Rasterize EVERY page of a PDF to PNG, in document order.
+
+    Returns the ordered list of page PNG paths. Prefers PyMuPDF (fitz) with a
+    ``dpi/72`` zoom matrix (matches the tool-loop rasterizer); falls back to
+    pdf2image. PDFs are never sent to the VLM directly — qwen3.6-plus only
+    accepts raster images via ``image_url``.
+    """
+    cache = _pdf_page_cache_dir(pdf_path, dpi)
+    out_paths: list[str] = []
     try:
         import fitz  # PyMuPDF
-    except ImportError:
-        try:
-            from pdf2image import convert_from_path
-            images = convert_from_path(str(pdf_path), first_page=1, last_page=1)
-            if images:
-                images[0].save(str(out), "PNG")
-                return str(out)
-        except Exception:
-            pass
-        return None
-    try:
+
         doc = fitz.open(str(pdf_path))
-        page = doc[0]
-        mat = fitz.Matrix(2.0, 2.0)
-        pix = page.get_pixmap(matrix=mat)
-        pix.save(str(out))
+        zoom = dpi / 72.0
+        for i in range(doc.page_count):
+            out = cache / f"page{i + 1:02d}.png"
+            if not out.exists():
+                page = doc.load_page(i)
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                pix.save(str(out))
+            out_paths.append(str(out))
         doc.close()
-        return str(out)
+        return out_paths
     except Exception:
-        return None
+        out_paths = []
+
+    try:
+        from pdf2image import convert_from_path
+
+        images = convert_from_path(str(pdf_path), dpi=dpi)
+        for i, im in enumerate(images):
+            out = cache / f"page{i + 1:02d}.png"
+            im.save(str(out), "PNG")
+            out_paths.append(str(out))
+    except Exception:
+        pass
+    return out_paths
 
 
-def _encode_resized(image_path: str) -> str:
-    """Resize large images to PLANNER_IMAGE_MAX_DIM before base64 encoding."""
+def _encode_image_clamped(image_path: str, max_pixels: int = PLANNER_MAX_PIXELS) -> str:
+    """Base64-encode a raster image, downscaling only if it exceeds the VLM's
+    per-image pixel budget. No fixed small cap — schematic detail is kept."""
+    import base64
+    import io
+
     im = Image.open(image_path)
     w, h = im.size
-    if max(w, h) > PLANNER_IMAGE_MAX_DIM:
-        ratio = PLANNER_IMAGE_MAX_DIM / max(w, h)
-        im = im.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
-    # Save resized version to bytes, then encode
-    import io
+    if max_pixels <= 0:
+        mime, _ = mimetypes.guess_type(Path(image_path).name)
+        if mime is None:
+            mime = "image/png"
+        b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    if w * h > max_pixels:
+        ratio = (max_pixels / float(w * h)) ** 0.5
+        im = im.resize((max(1, int(w * ratio)), max(1, int(h * ratio))), Image.LANCZOS)
+    if im.mode in ("RGBA", "P", "LA"):
+        im = im.convert("RGB")
     buf = io.BytesIO()
-    im.save(buf, format="JPEG" if im.mode != "RGBA" else "PNG")
-    buf.seek(0)
-    import base64
-    mime = "image/jpeg" if im.mode != "RGBA" else "image/png"
-    b64 = base64.b64encode(buf.read()).decode("ascii")
-    return f"data:{mime};base64,{b64}"
+    im.save(buf, format="JPEG", quality=PLANNER_JPEG_QUALITY)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+    return f"data:image/jpeg;base64,{b64}"
 
 
 def run_planner(
     user_question: str,
     schematic_image_path: str | None = None,
-    assembly_image_path: str | None = None,
     cfg: Config | None = None,
     event_sink=None,
 ) -> PlannerResult:
-    """One VLM call with inline schematic/assembly images to find target TPs."""
+    """One VLM call: user instruction + schematic diagram → target TPs.
+
+    Only the schematic (原理图) is sent to the planner; the 位号图 (assembly /
+    bit-locator drawing) is NOT used here — it is consumed by the downstream
+    steps that localize each returned test point on the board.
+    """
     import logging
     _log = logging.getLogger(__name__)
 
@@ -161,55 +201,82 @@ def run_planner(
             model=(_os.environ.get("VLM_MODEL", "")),
         )
 
-    # Planner is one-shot — override long service timeouts
-    cfg.http_timeout_sec = 600
-    cfg.http_max_retries = 0
-    cfg.connect_retries = 0
-    cfg.enable_thinking = False
-    cfg.reasoning_effort = None
+    # Planner is one-shot — raster images + no thinking.
+    planner_cfg = deepcopy(cfg)
+    planner_cfg.model = PLANNER_MODEL
+    planner_cfg.http_timeout_sec = 600
+    planner_cfg.http_max_retries = 0
+    planner_cfg.connect_retries = 0
+    planner_cfg.enable_thinking = False
+    planner_cfg.reasoning_effort = None
+    planner_cfg.thinking_mode = False
 
-    client = LLMClient(cfg)
+    client = LLMClient(planner_cfg)
     user_text = PLANNER_USER_TEMPLATE.format(user_question=user_question)
     parts: list[dict[str, Any]] = [client.text_part(user_text)]
-    images_attached: list[str] = []
+    attachments: list[str] = []
+    planner_messages: list[dict[str, Any]] = [client.system_message(PLANNER_SYSTEM_PROMPT)]
 
     for label, raw_path in [
         ("schematic_diagram", schematic_image_path),
-        ("assembly_drawing", assembly_image_path),
     ]:
         if not raw_path:
             continue
         _log.info("Planner: checking %s -> %s", label, raw_path)
-        img_path = _ensure_image(raw_path)
-        if not img_path:
-            _log.warning("Planner: %s not found or not renderable", label)
+        src = Path(raw_path)
+        if not src.exists():
+            _log.warning("Planner: %s not found: %s", label, raw_path)
             continue
-        try:
-            _log.info("Planner: encoding %s (%s)", label, img_path)
-            data_url = _encode_resized(img_path)
-            _log.info("Planner: encoded %s -> %d chars", label, len(data_url))
-            parts.append(client.image_part(data_url))
-            images_attached.append(f"{label}: {img_path}")
-        except Exception as exc:
-            _log.exception("Planner: failed to encode %s", label)
-            parts.append(client.text_part(
-                f"\n\n[note: could not load {label} image from {img_path}: {exc}]"
-            ))
 
-    if not images_attached:
-        _log.warning("Planner: no images attached, returning empty")
-        _emit("planner.progress", {"phase": "no_images", "message": "未找到可用的原理图/位号图"})
+        ext = src.suffix.lower()
+        if ext == ".pdf":
+            _emit("planner.progress", {
+                "phase": "rasterizing",
+                "message": f"正在栅格化原理图 PDF（{PLANNER_PDF_DPI} DPI）...",
+            })
+            page_paths = _render_pdf_all_pages(src)
+            if not page_paths:
+                _log.warning("Planner: failed to rasterize PDF %s", src)
+                parts.append(client.text_part(
+                    f"\n\n[note: could not rasterize {label} PDF {src}]"
+                ))
+                continue
+        elif ext in {".png", ".jpg", ".jpeg", ".bmp", ".webp", ".tif", ".tiff"}:
+            page_paths = [str(src)]
+        else:
+            _log.warning("Planner: unsupported %s format: %s", label, src)
+            continue
+
+        total = len(page_paths)
+        for idx, page_path in enumerate(page_paths, start=1):
+            try:
+                data_url = _encode_image_clamped(page_path)
+            except Exception as exc:
+                _log.exception("Planner: failed to encode %s page %d", label, idx)
+                parts.append(client.text_part(
+                    f"\n\n[note: could not load {label} page {idx} from {page_path}: {exc}]"
+                ))
+                continue
+            if total > 1:
+                parts.append(client.text_part(f"[{label} — page {idx}/{total}]"))
+            parts.append(client.image_part(data_url))
+            attachments.append(f"{label} p{idx}/{total}: {page_path}")
+            _log.info("Planner: encoded %s page %d/%d -> %d chars",
+                      label, idx, total, len(data_url))
+
+    if not attachments:
+        _log.warning("Planner: no schematic attached, returning empty")
+        _emit("planner.progress", {"phase": "no_images", "message": "未找到可用的原理图"})
         return PlannerResult(target_points=[])
 
-    _emit("planner.progress", {"phase": "encoding", "message": f"正在编码 {len(images_attached)} 张图片...", "images": images_attached})
-    _log.info("Planner: calling VLM API with %d images", len(images_attached))
-    _emit("planner.progress", {"phase": "calling_vlm", "message": "正在调用 VLM 分析图片..."})
+    if parts:
+        planner_messages.append(client.user_message(parts))
+    _emit("planner.progress", {"phase": "encoding", "message": f"Planner 已准备 {len(attachments)} 份原理图输入...", "images": attachments})
+    _log.info("Planner: calling %s with %d prepared inputs", planner_cfg.model, len(attachments))
+    _emit("planner.progress", {"phase": "calling_vlm", "message": f"正在调用 {planner_cfg.model} 分析原理图..."})
     try:
         reply = client.chat(
-            messages=[
-                client.system_message(PLANNER_SYSTEM_PROMPT),
-                client.user_message(parts),
-            ],
+            messages=planner_messages,
             tools_schema=None,
         )
         _log.info("Planner: VLM API returned")

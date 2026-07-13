@@ -136,6 +136,42 @@ export class RemoteVlmAgentServiceRunner {
     };
   }
 
+  /**
+   * Create a split (planner + parallel children) run on the remote server.
+   * Mirrors VlmAgentServiceRunner.createSplitRun for interface compatibility.
+   */
+  async createSplitRun(payload) {
+    try {
+      const resp = await this._fetchWithRetry(() =>
+        fetch(`${this.baseUrl}/v1/runs/split`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      );
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw Object.assign(
+          new Error(`Failed to create VLM agent split run: HTTP ${resp.status} — ${body}`),
+          { details: { category: "vlm-agent-service", status: resp.status, body } }
+        );
+      }
+      return resp.json();
+    } catch (cause) {
+      if (cause.details) throw cause;
+      throw Object.assign(
+        new Error(`Failed to create VLM agent split run: ${cause.message}`),
+        {
+          details: {
+            category: "vlm-agent-service-unavailable",
+            action: "Start the VLM agent service or set VLM_AGENT_SERVICE_URL to the server-hosted service.",
+            serviceUrl: this.baseUrl,
+          },
+        }
+      );
+    }
+  }
+
   // ------------------------------------------------------------------ //
   //  waitForRun — matches VlmAgentServiceRunner interface (server.js)
   // ------------------------------------------------------------------ //

@@ -60,9 +60,15 @@ otherwise **`read_text_file` your `workflow_doc`** if only a path is listed — 
      its ID and nearby reference designators.
   4. `read_text_file` the schematic/netlist to confirm which net the TP
      belongs to and which components / pads it connects to.
-  5. `view_image` the front and back camera captures; decide which side
-     the TP lives on using silk-screen, component shapes and the
-     reference designators you learned in step 2–3.
+  5. `view_image` **both** the front board photo (``front_board_photo``)
+     and, when provided, the back board photo (``back_board_photo``).
+     Decide which side the TP lives on using silk-screen, component shapes
+     and the reference designators you learned in step 2–3.
+     **If ``back_board_photo`` is available** and the TP is on the back
+     side (e.g. silk-screen / refdes / pad shape only visible on the back
+     image), you **MUST** annotate and ``finish`` on the **back** image,
+     setting ``camera_view`` = ``"back"``.  If only the front photo is
+     provided and the TP is not visible, set ``needs_user_help=true``.
   6. Use `crop_image` to zoom into the relevant region of the camera
      photo. Use `run_python` for template-matching / feature-matching
      between the locator drawing and the camera photo when a direct

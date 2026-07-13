@@ -11,9 +11,12 @@ export function buildVlmAgentTaskYaml(input, savedAssets) {
     assembly_drawing_pdf: bitPdf?.fileName,
     assembly_drawing: bitImage?.fileName,
     front_board_photo: savedAssets.cameraImage?.fileName,
+    back_board_photo: savedAssets.cameraImageBack?.fileName,
+    target_board_side: input.targetBoardSide || "auto",
     board_id: input.caseId || "inputdemo-case",
     engineer_note: block([
       `Operator: ${input.operator || "unknown"}`,
+      `Target board side: ${input.targetBoardSide || "auto"}`,
       "Part B: grid=tp_marked->grid.png->vlm_roi; OpenCV ungridded tp_marked. See STANDARD_WORKFLOW Part B.",
       "Gen by Inputdemo. PDF->asm_pdf, IMG->asm_fb."
     ].join("\n"))

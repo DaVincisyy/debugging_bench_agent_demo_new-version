@@ -20,16 +20,9 @@ Per-phase allowed tools (runtime whitelist; illegal calls are rejected before ex
 ```
 
 ### parta_board_largest_ic
-- Tools: run_python, detect_largest_ic_on_board_from_vlm_hint, view_image, save_text_file, annotate_image, read_text_file
-- save_text_file → debug/case10_vlm_hints.json example:
-```json
-{
-  "approx_bbox_norm": [0.42, 0.38, 0.58, 0.62],
-  "region_hint": "largest IC package on board photo",
-  "visual_cues": "big square QFP with readable silkscreen refdes",
-  "reference_text": "U12 or similar refdes on package"
-}
-```
+- Tools: run_python, detect_largest_ic_on_board_full, detect_largest_ic_on_board_from_vlm_hint, view_image, save_text_file, annotate_image, read_text_file
+- Primary path: call `detect_largest_ic_on_board_full` (no VLM hints; auto PCB mask + QFP filters on full board photo).
+- Optional: `view_image` on `debug/case10_largest_ic_box.png` after detection for QC.
 
 ### partd_case12_align_and_finish
 - Tools: case12_build_and_align_from_step02_anchors, emit_step08_from_case12_aligned, run_python, annotate_image, save_text_file, finish, view_image

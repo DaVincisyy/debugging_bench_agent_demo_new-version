@@ -329,6 +329,8 @@ function formatRunForWorker(workerId, run, now) {
 }
 
 function formatQueuedRun(run, now) {
+  const isTerminal = TERMINAL.has(run.status) || run.status === "completed";
+  const end = isTerminal ? (run.finishedAt || run.lastEventAt || now) : now;
   return {
     runId: run.runId,
     caseId: run.caseId,
@@ -339,7 +341,7 @@ function formatQueuedRun(run, now) {
     maxSteps: run.maxSteps,
     lastTool: run.lastTool,
     lastEventType: run.lastEventType,
-    elapsedMs: now - (run.startedAt || run.createdAt || now),
+    elapsedMs: end - (run.startedAt || run.createdAt || end),
     workerId: run.workerId,
     error: run.error
   };

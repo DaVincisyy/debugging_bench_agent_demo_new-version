@@ -69,6 +69,12 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
         size: 2048,
         dataUrl: tinyPng
       },
+      Camera_image_back: {
+        name: "PCBA_BACK.jpg",
+        type: "image/jpeg",
+        size: 2048,
+        dataUrl: tinyPng
+      },
       Bit_image: [
         { name: "bit-map.png", type: "image/png", size: 1024, dataUrl: tinyPng },
         { name: "bit-map.pdf", type: "application/pdf", size: 4096, dataUrl: tinyPdf }
@@ -85,6 +91,7 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.equal(run.input.caseId, "case-001");
     assert.equal(run.input.operator, "demo-user");
     assert.equal(run.input.cameraImage.name, "PCBA_IMG.jpg");
+    assert.equal(run.input.cameraImageBack.name, "PCBA_BACK.jpg");
     assert.equal(run.state, AgentState.REPORTING);
     assert.equal(run.vlmObservation.model, "mock-vlm-v0");
     assert.equal("modelInputYaml" in run, false);
@@ -93,6 +100,7 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.match(run.vlmAgentCase.caseDir, /case-001$/);
     assert.match(run.vlmAgentCase.taskYaml, /user_measurement_question:/);
     assert.match(run.vlmAgentCase.taskYaml, /front_board_photo: "PCBA_IMG.jpg"/);
+    assert.match(run.vlmAgentCase.taskYaml, /back_board_photo: "PCBA_BACK.jpg"/);
     assert.match(run.vlmAgentCase.taskYaml, /assembly_drawing_pdf: "bit-map.pdf"/);
     assert.match(run.vlmAgentCase.taskYaml, /assembly_drawing: "bit-map.png"/);
     assert.match(run.vlmAgentCase.taskYaml, /schematic_pdf: "schematic.pdf"/);
@@ -114,7 +122,7 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.deepEqual(run.execution.arm[0].fallbackPose, {
       x: 245.6,
       y: -32.4,
-      z: 95,
+      z: 78.2,
       r: 91.5
     });
     assert.deepEqual(simulationRequests, ["GetPose()"]);
