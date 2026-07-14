@@ -142,13 +142,18 @@ def _candidate_landmarks(image, board_contour, *, domain: str, max_kept: int = 1
     cv2, np = _cv()
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blur, 35, 135)
+    # Locator line art is extremely faint after PDF rasterization. Candidate
+    # generation should be permissive; semantic acceptance belongs to the VLM.
+    edges = cv2.Canny(blur, 8, 55) if domain == "locator" else cv2.Canny(blur, 30, 125)
     board_mask = np.zeros(gray.shape, dtype=np.uint8)
     cv2.drawContours(board_mask, [board_contour], -1, 255, thickness=-1)
     edges = cv2.bitwise_and(edges, board_mask)
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     _, _, bw, bh = cv2.boundingRect(board_contour)
     board_diag = max(1.0, math.hypot(bw, bh))
+    board_corners = _ordered_box(board_contour).astype(np.float32)
+    unit_corners = np.float32([[0, 0], [0, 1], [1, 1], [1, 0]])
+    to_unit = cv2.getPerspectiveTransform(board_corners, unit_corners)
     raw: list[dict[str, Any]] = []
     for contour in contours:
         area = float(cv2.contourArea(contour))
@@ -164,6 +169,9 @@ def _candidate_landmarks(image, board_contour, *, domain: str, max_kept: int = 1
             continue
         if cv2.pointPolygonTest(board_contour, (float(x), float(y)), False) < 0:
             continue
+        uv = cv2.perspectiveTransform(np.float32([[[x, y]]]), to_unit)[0, 0]
+        u, v = float(uv[0]), float(uv[1])
+        edge_band_norm = min(u, v, 1.0 - u, 1.0 - v)
         inner, ring, contrast = _patch_stats(gray, x, y, radius)
         edge_distance = abs(float(cv2.pointPolygonTest(board_contour, (float(x), float(y)), True))) / board_diag
         size_score = max(0.0, min(1.0, (radius_norm - 0.0045) / 0.018))
@@ -176,8 +184,8 @@ def _candidate_landmarks(image, board_contour, *, domain: str, max_kept: int = 1
         else:
             # Drawings commonly show a white opening bounded by a dark ring.
             opening_score = max(0.0, min(1.0, (inner - ring) / 100.0))
-        edge_prior = 1.0 if edge_distance <= 0.16 else 0.35
-        score = 0.28 * size_score + 0.20 * round_score + 0.20 * contrast_score + 0.24 * opening_score + 0.08 * edge_prior
+        edge_prior = max(0.0, min(1.0, (0.18 - edge_band_norm) / 0.12))
+        score = 0.24 * size_score + 0.16 * round_score + 0.16 * contrast_score + 0.24 * opening_score + 0.20 * edge_prior
         reasons: list[str] = []
         if radius_norm < 0.006:
             reasons.append("too_small_likely_pad_or_via")
@@ -187,16 +195,77 @@ def _candidate_landmarks(image, board_contour, *, domain: str, max_kept: int = 1
             reasons.append("bright_filled_center_likely_solder_pad")
         if contrast < 16:
             reasons.append("no_clear_hole_ring")
-        accepted = score >= 0.52 and radius_norm >= 0.006 and not (domain == "photo" and inner > 175)
+        if edge_band_norm > 0.18:
+            reasons.append("outside_pcb_edge_band")
+        accepted = (
+            score >= (0.38 if domain == "locator" else 0.42)
+            and radius_norm >= 0.006
+            and edge_band_norm <= 0.18
+        )
         raw.append({
             "x": float(x), "y": float(y), "radius": float(radius),
             "radius_norm": radius_norm, "circularity": circularity,
+            "board_uv": [u, v], "edge_band_norm": edge_band_norm,
             "inner_gray": inner, "ring_gray": ring, "ring_contrast": contrast,
             "edge_distance_norm": edge_distance, "mechanical_score": score,
             "accepted": bool(accepted),
-            "classification": "mechanical_hole_candidate" if accepted else "rejected_pad_via_or_unknown",
+            "classification": "pcb_edge_opening_candidate_for_vlm" if accepted else "rejected_pad_via_or_unknown",
             "rejection_reasons": reasons if reasons else ([] if accepted else ["low_mechanical_score"]),
+            "proposal_source": "contour",
         })
+
+    if domain == "locator":
+        # Assembly drawings often render mounting-hole rings in very light gray.
+        # Canny/contours can miss them completely, so add a second proposal path
+        # restricted to the PCB corners. This is intentionally only a proposal:
+        # the VLM must still reject component circles and rounded board corners.
+        scale = min(1.0, 2000.0 / max(gray.shape[:2]))
+        small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        enhanced = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(16, 16)).apply(small)
+        circles = cv2.HoughCircles(
+            enhanced,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=max(18, int(round(25 * scale))),
+            param1=60,
+            param2=24,
+            minRadius=max(4, int(round(15 * scale))),
+            maxRadius=max(10, int(round(85 * scale))),
+        )
+        if circles is not None:
+            for sx, sy, sr in circles[0]:
+                x, y, radius = float(sx / scale), float(sy / scale), float(sr / scale)
+                radius_norm = radius / board_diag
+                if not (0.006 <= radius_norm <= 0.025):
+                    continue
+                if cv2.pointPolygonTest(board_contour, (x, y), False) < 0:
+                    continue
+                uv = cv2.perspectiveTransform(np.float32([[[x, y]]]), to_unit)[0, 0]
+                u, v = float(uv[0]), float(uv[1])
+                edge_band_norm = min(u, v, 1.0 - u, 1.0 - v)
+                corner_distance = min(
+                    math.hypot(u, v), math.hypot(u, 1.0 - v),
+                    math.hypot(1.0 - u, v), math.hypot(1.0 - u, 1.0 - v),
+                )
+                # Exclude the outline's own rounded corner (too close to both
+                # edges), while retaining the normally inset tooling holes.
+                if not (0.025 <= edge_band_norm <= 0.12 and corner_distance <= 0.22):
+                    continue
+                inner, ring, contrast = _patch_stats(gray, x, y, radius)
+                size_fit = max(0.0, 1.0 - abs(radius_norm - 0.012) / 0.014)
+                corner_fit = max(0.0, 1.0 - abs(corner_distance - 0.11) / 0.16)
+                score = 0.70 + 0.12 * size_fit + 0.10 * corner_fit + 0.08 * min(1.0, contrast / 70.0)
+                raw.append({
+                    "x": x, "y": y, "radius": radius,
+                    "radius_norm": radius_norm, "circularity": 1.0,
+                    "board_uv": [u, v], "edge_band_norm": edge_band_norm,
+                    "corner_distance_norm": corner_distance,
+                    "inner_gray": inner, "ring_gray": ring, "ring_contrast": contrast,
+                    "edge_distance_norm": abs(float(cv2.pointPolygonTest(board_contour, (x, y), True))) / board_diag,
+                    "mechanical_score": score, "accepted": True,
+                    "classification": "pcb_corner_opening_candidate_for_vlm",
+                    "rejection_reasons": [], "proposal_source": "faint_ring_hough",
+                })
     # Merge duplicate inner/outer contours around the same physical feature.
     raw.sort(key=lambda c: c["mechanical_score"], reverse=True)
     merged: list[dict[str, Any]] = []
@@ -299,8 +368,8 @@ def _reviewed_hypotheses(locator_corners, board_corners, locator_mask, board_mas
         landmark_type = str(match.get("landmark_type", "")).strip().lower()
         if landmark_type not in {"mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"}:
             raise ValueError(f"unsupported VLM landmark type: {landmark_type or 'missing'}")
-        if float(match.get("confidence", 0.0)) < 0.55:
-            raise ValueError(f"VLM landmark pair confidence below 0.55: {locator_item['id']} -> {board_item['id']}")
+        if float(match.get("confidence", 0.0)) < 0.75:
+            raise ValueError(f"VLM landmark pair confidence below 0.75: {locator_item['id']} -> {board_item['id']}")
         resolved.append((locator_item, board_item, match))
     if len(resolved) < 2:
         raise ValueError("VLM review must provide at least two reliable landmark correspondences")
@@ -349,6 +418,80 @@ def _reviewed_hypotheses(locator_corners, board_corners, locator_mask, board_mas
             })
     results.sort(key=lambda item: item["score"], reverse=True)
     return results
+
+
+def _refine_homography_with_review(locator_corners, board_mask, locator_mask, reviewed_best):
+    """Fit corners + VLM-reviewed edge holes, accepting only a measurable improvement."""
+    cv2, np = _cv()
+    base_matrix = reviewed_best["matrix"]
+    base_destination = cv2.perspectiveTransform(
+        locator_corners.reshape(1, -1, 2).astype(np.float32), base_matrix
+    )[0]
+    inlier_pairs = [
+        pair for pair in reviewed_best.get("pairs", [])
+        if pair.get("inlier") and float(pair.get("vlm_confidence", 0.0)) >= 0.75
+    ]
+    validation: dict[str, Any] = {
+        "attempted": True,
+        "reviewed_pair_count": len(reviewed_best.get("pairs", [])),
+        "eligible_pair_count": len(inlier_pairs),
+        "accepted": False,
+        "fallback_reason": None,
+    }
+    if len(inlier_pairs) < 2:
+        validation["fallback_reason"] = "fewer_than_two_high_confidence_edge_hole_pairs"
+        return base_matrix, validation
+
+    src = [list(map(float, point)) for point in locator_corners]
+    dst = [list(map(float, point)) for point in base_destination]
+    for pair in inlier_pairs:
+        src.append(list(map(float, pair["locator_px"])))
+        dst.append(list(map(float, pair["board_px"])))
+    src_np = np.float32(src)
+    dst_np = np.float32(dst)
+    refined, ransac_mask = cv2.findHomography(src_np, dst_np, cv2.RANSAC, 8.0)
+    if refined is None:
+        validation["fallback_reason"] = "homography_fit_failed"
+        return base_matrix, validation
+
+    locator_holes = np.float32([[pair["locator_px"] for pair in inlier_pairs]])
+    board_holes = np.float32([pair["board_px"] for pair in inlier_pairs])
+    base_holes = cv2.perspectiveTransform(locator_holes, base_matrix)[0]
+    refined_holes = cv2.perspectiveTransform(locator_holes, refined)[0]
+    base_errors = np.linalg.norm(base_holes - board_holes, axis=1)
+    refined_errors = np.linalg.norm(refined_holes - board_holes, axis=1)
+    refined_corners = cv2.perspectiveTransform(
+        locator_corners.reshape(1, -1, 2).astype(np.float32), refined
+    )[0]
+    corner_errors = np.linalg.norm(refined_corners - base_destination, axis=1)
+    h, w = board_mask.shape[:2]
+    board_diag = math.hypot(w, h)
+    base_mean = float(np.mean(base_errors))
+    refined_mean = float(np.mean(refined_errors))
+    corner_rmse = float(np.sqrt(np.mean(corner_errors ** 2)))
+    base_iou = _outline_iou(locator_mask, board_mask, base_matrix)
+    refined_iou = _outline_iou(locator_mask, board_mask, refined)
+    improvement = base_mean - refined_mean
+    accepted = bool(
+        refined_mean <= max(10.0, board_diag * 0.012)
+        and improvement >= max(1.5, base_mean * 0.08)
+        and corner_rmse <= max(12.0, board_diag * 0.012)
+        and refined_iou >= base_iou - 0.02
+    )
+    validation.update({
+        "base_hole_errors_px": [round(float(v), 3) for v in base_errors],
+        "refined_hole_errors_px": [round(float(v), 3) for v in refined_errors],
+        "base_mean_hole_error_px": round(base_mean, 3),
+        "refined_mean_hole_error_px": round(refined_mean, 3),
+        "hole_error_improvement_px": round(improvement, 3),
+        "corner_rmse_px": round(corner_rmse, 3),
+        "base_outline_iou": round(base_iou, 4),
+        "refined_outline_iou": round(refined_iou, 4),
+        "ransac_inliers": int(np.count_nonzero(ransac_mask)) if ransac_mask is not None else 0,
+        "accepted": accepted,
+        "fallback_reason": None if accepted else "refinement_did_not_pass_strict_improvement_gate",
+    })
+    return (refined if accepted else base_matrix), validation
 
 
 def _green_tp(image):
@@ -403,6 +546,37 @@ def _side_by_side(left, right):
         scale = height / image.shape[0]
         return cv2.resize(image, (int(round(image.shape[1] * scale)), height))
     return np.hstack([resize(left), resize(right)])
+
+
+def _candidate_contact_sheet(locator, board, locator_candidates, board_candidates):
+    """High-resolution full-board comparison plus enlarged edge-hole crops for VLM review."""
+    cv2, np = _cv()
+    top = _side_by_side(
+        _draw_candidates(locator, locator_candidates, [], "LOCATOR edge-hole candidates"),
+        _draw_candidates(board, board_candidates, [], "PHOTO edge-hole candidates"),
+    )
+    tile_w, tile_h = 220, 170
+    items = [("LOCATOR", locator, item) for item in locator_candidates[:8]]
+    items += [("PHOTO", board, item) for item in board_candidates[:8]]
+    cols = 8
+    rows = max(1, math.ceil(len(items) / cols))
+    strip = np.full((rows * tile_h, cols * tile_w, 3), 245, dtype=np.uint8)
+    for index, (domain, image, item) in enumerate(items):
+        row, col = divmod(index, cols)
+        x, y = int(round(item["x"])), int(round(item["y"]))
+        radius = max(35, int(round(item["radius"] * 3.2)))
+        x1, y1 = max(0, x - radius), max(0, y - radius)
+        x2, y2 = min(image.shape[1], x + radius), min(image.shape[0], y + radius)
+        crop = image[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
+        crop = cv2.resize(crop, (tile_w, tile_h - 28), interpolation=cv2.INTER_AREA)
+        ox, oy = col * tile_w, row * tile_h
+        strip[oy + 28:oy + tile_h, ox:ox + tile_w] = crop
+        cv2.putText(strip, f"{domain} {item['id']}", (ox + 6, oy + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 70, 180), 2)
+    if strip.shape[1] != top.shape[1]:
+        strip = cv2.resize(strip, (top.shape[1], max(1, int(strip.shape[0] * top.shape[1] / strip.shape[1]))))
+    return np.vstack([top, strip])
 
 
 def _comparison(locator_image, board_image, locator_candidates, board_candidates, pairs):
@@ -493,7 +667,7 @@ def _local_tp_refinement(board, projected_x: float, projected_y: float):
 
 
 def prepare_landmark_review(locator_path: str | Path, board_path: str | Path, debug_dir: str | Path) -> dict[str, Any]:
-    """Generate numbered candidate sheets for mandatory VLM semantic review."""
+    """Generate PCB-edge hole candidates for optional, fail-safe VLM semantic review."""
     locator = _load(locator_path)
     board = _load(board_path)
     locator_contour, _, locator_outline = _board_contour(locator, domain="locator")
@@ -514,26 +688,27 @@ def prepare_landmark_review(locator_path: str | Path, board_path: str | Path, de
         raise ValueError(
             "PCB outline quality gate failed; inspect back_01_*_outline.png and back_01_outline_metrics.json"
         )
-    locator_sheet = _draw_candidates(locator, loc_ok, loc_rejected, "LOCATOR candidates: green=CV probable, gray=CV rejected")
-    board_sheet = _draw_candidates(board, brd_ok, brd_rejected, "PHOTO candidates: green=CV probable, gray=CV rejected")
-    _write(debug / "back_optional_locator_candidates.png", locator_sheet)
-    _write(debug / "back_optional_photo_candidates.png", board_sheet)
-    pair_sheet = _side_by_side(locator_sheet, board_sheet)
-    _write(debug / "back_optional_vlm_candidate_sheet.png", pair_sheet)
+    locator_sheet = _draw_candidates(locator, loc_ok, loc_rejected, "LOCATOR PCB-edge hole candidates")
+    board_sheet = _draw_candidates(board, brd_ok, brd_rejected, "PHOTO PCB-edge hole candidates")
+    _write(debug / "back_02_locator_edge_hole_candidates.png", locator_sheet)
+    _write(debug / "back_02_photo_edge_hole_candidates.png", board_sheet)
+    pair_sheet = _candidate_contact_sheet(locator, board, loc_ok, brd_ok)
+    _write(debug / "back_02_vlm_edge_hole_candidate_sheet.png", pair_sheet)
     payload = {
         "instruction": (
-            "VLM must classify candidates semantically and match only stable mechanical landmarks. "
-            "Ordinary solder pads, vias and TP pads are forbidden as global anchors."
+            "VLM must match only true PCB-edge openings: mounting holes, tooling holes, non-plated holes, "
+            "or distinctive board cutouts. Ordinary solder pads, vias, TP pads and component circles are forbidden. "
+            "Use relative position along the four PCB edges and nearby outline geometry; require confidence >= 0.75."
         ),
         "locator": {"accepted_by_cv": loc_ok, "rejected_by_cv": loc_rejected},
         "photo": {"accepted_by_cv": brd_ok, "rejected_by_cv": brd_rejected},
     }
-    _json(debug / "back_optional_candidate_classification.json", payload)
+    _json(debug / "back_02_edge_hole_candidates.json", payload)
     return {
         "locator_candidate_count": len(loc_ok) + len(loc_rejected),
         "photo_candidate_count": len(brd_ok) + len(brd_rejected),
-        "candidate_sheet": str(debug / "back_optional_vlm_candidate_sheet.png"),
-        "candidate_json": str(debug / "back_optional_candidate_classification.json"),
+        "candidate_sheet": str(debug / "back_02_vlm_edge_hole_candidate_sheet.png"),
+        "candidate_json": str(debug / "back_02_edge_hole_candidates.json"),
     }
 
 
@@ -560,45 +735,72 @@ def register(
     loc_rejected: list[dict[str, Any]] = []
     brd_ok: list[dict[str, Any]] = []
     brd_rejected: list[dict[str, Any]] = []
+    review_error: str | None = None
     if review_file is not None and review_file.is_file():
-        loc_ok, loc_rejected = _candidate_landmarks(locator, locator_contour, domain="locator")
-        brd_ok, brd_rejected = _candidate_landmarks(board, board_contour, domain="photo")
-        review = json.loads(review_file.read_text(encoding="utf-8"))
-        if review.get("review_source") == "vlm_visual_semantic_review" and isinstance(review.get("matches"), list):
-            review_matches = review["matches"]
-            hypotheses = _reviewed_hypotheses(
-                locator_corners, board_corners, locator_mask, board_mask,
-                loc_ok + loc_rejected, brd_ok + brd_rejected, review_matches,
+        try:
+            loc_ok, loc_rejected = _candidate_landmarks(locator, locator_contour, domain="locator")
+            brd_ok, brd_rejected = _candidate_landmarks(board, board_contour, domain="photo")
+            review = json.loads(review_file.read_text(encoding="utf-8"))
+            if review.get("review_source") == "vlm_visual_semantic_review" and isinstance(review.get("matches"), list):
+                review_matches = review["matches"]
+                hypotheses = _reviewed_hypotheses(
+                    locator_corners, board_corners, locator_mask, board_mask,
+                    loc_ok + loc_rejected, brd_ok + brd_rejected, review_matches,
+                )
+        except Exception as exc:  # VLM review is advisory; rectangle path must remain available.
+            review_error = str(exc)
+
+    h, w = board.shape[:2]
+    rectangle_matrix = cv2.getPerspectiveTransform(
+        locator_corners.astype(np.float32), board_corners.astype(np.float32)
+    )
+    threshold = max(12.0, math.hypot(w, h) * 0.035)
+    best = {
+        "rotation_quadrants": 0,
+        "mirrored": False,
+        "outline_iou": _outline_iou(locator_mask, board_mask, rectangle_matrix),
+        "pair_count": 0,
+        "reviewed_pair_count": len(review_matches),
+        "mean_error_px": 0.0,
+        "matching_threshold_px": threshold,
+        "score": 0.0,
+        "pairs": [],
+        "matrix": rectangle_matrix,
+    }
+    matrix = rectangle_matrix
+    score_margin = 1.0
+    orientation_source = "bottom_view_display_contract_tl_to_tl"
+    refinement_validation: dict[str, Any] = {
+        "attempted": bool(review_file is not None and review_file.is_file()),
+        "accepted": False,
+        "fallback_reason": review_error or "no_valid_vlm_edge_hole_review",
+    }
+    if not review_error and hypotheses:
+        reviewed_best = hypotheses[0]
+        reviewed_margin = float(reviewed_best["score"] - hypotheses[1]["score"]) if len(hypotheses) >= 2 else 0.0
+        if reviewed_best["pair_count"] >= 2 and reviewed_margin >= 0.12:
+            candidate_matrix, refinement_validation = _refine_homography_with_review(
+                locator_corners, board_mask, locator_mask, reviewed_best
             )
-    best = hypotheses[0] if hypotheses else None
-    score_margin = float(best["score"] - hypotheses[1]["score"]) if len(hypotheses) >= 2 else 0.0
-    orientation_source = "vlm_mechanical_landmarks"
-    if best is None or best["pair_count"] < 2 or score_margin < 0.12:
-        # First-principles fallback: four rectangle corners define the
-        # homography.  For ASSEMBLY_BOTTOM and a directly viewed back photo,
-        # use the explicit display-orientation contract (TL->TL, no mirror).
-        matrix = cv2.getPerspectiveTransform(
-            locator_corners.astype(np.float32), board_corners.astype(np.float32)
-        )
-        best = {
-            "rotation_quadrants": 0,
-            "mirrored": False,
-            "outline_iou": _outline_iou(locator_mask, board_mask, matrix),
-            "pair_count": 0,
-            "reviewed_pair_count": len(review_matches),
-            "mean_error_px": 0.0,
-            "matching_threshold_px": max(12.0, math.hypot(w := board.shape[1], h := board.shape[0]) * 0.035),
-            "score": 0.0,
-            "pairs": [],
-            "matrix": matrix,
-        }
-        score_margin = 1.0
-        orientation_source = "bottom_view_display_contract_tl_to_tl"
-        hypotheses.insert(0, best)
-    matrix = best["matrix"]
+            if refinement_validation.get("accepted"):
+                matrix = candidate_matrix
+                best = dict(reviewed_best)
+                best["matrix"] = matrix
+                best["outline_iou"] = _outline_iou(locator_mask, board_mask, matrix)
+                orientation_source = "vlm_edge_holes_refined_homography"
+                score_margin = reviewed_margin
+            else:
+                refinement_validation["orientation_score_margin"] = round(reviewed_margin, 4)
+        else:
+            refinement_validation = {
+                "attempted": True,
+                "accepted": False,
+                "fallback_reason": "vlm_pairs_do_not_uniquely_validate_orientation",
+                "reviewed_pair_count": len(review_matches),
+                "orientation_score_margin": round(reviewed_margin, 4),
+            }
     tx, ty = _green_tp(locator)
     projected = cv2.perspectiveTransform(np.float32([[[tx, ty]]]), matrix)[0, 0]
-    h, w = board.shape[:2]
     projected_x = float(np.clip(projected[0], 0, w - 1))
     projected_y = float(np.clip(projected[1], 0, h - 1))
     px, py, local_evidence, local_overlay = _local_tp_refinement(board, projected_x, projected_y)
@@ -618,6 +820,8 @@ def register(
         "homography_3x3": [[round(float(value), 9) for value in row] for row in matrix.tolist()],
         "orientation": {"rotation_quadrants": best["rotation_quadrants"], "mirrored": best["mirrored"]},
         "orientation_source": orientation_source,
+        "registration_selection": "vlm_edge_holes_refined" if refinement_validation.get("accepted") else "rectangle_fallback",
+        "edge_hole_refinement_validation": refinement_validation,
         "outline_iou": round(float(best["outline_iou"]), 4),
         "inlier_hole_count": int(best["pair_count"]),
         "mean_hole_error_px": round(float(best["mean_error_px"]), 3),
@@ -635,6 +839,7 @@ def register(
             "overall_evidence": review.get("overall_evidence", ""),
             "reviewed_match_count": len(review_matches),
             "optional": True,
+            "review_error": review_error,
         },
     }
 
@@ -653,29 +858,31 @@ def register(
         if review_matches:
             locator_candidates = _draw_candidates(locator, loc_ok, loc_rejected, "LOCATOR landmark classification")
             board_candidates = _draw_candidates(board, brd_ok, brd_rejected, "PHOTO landmark classification")
-            _write(debug / "back_optional_landmark_comparison.png", _comparison(locator, board, loc_ok, brd_ok, best["pairs"]))
-            _json(debug / "back_optional_landmark_pairs.json", {"pairs": best["pairs"]})
-            _write(debug / "back_optional_locator_candidates.png", locator_candidates)
-            _write(debug / "back_optional_photo_candidates.png", board_candidates)
+            _write(debug / "back_04_vlm_hole_pair_comparison.png", _comparison(locator, board, loc_ok, brd_ok, best["pairs"]))
+            _json(debug / "back_04_vlm_hole_refinement_validation.json", refinement_validation)
+            _write(debug / "back_04_locator_hole_review.png", locator_candidates)
+            _write(debug / "back_04_photo_hole_review.png", board_candidates)
         warped = cv2.warpPerspective(locator, matrix, (w, h))
         reprojection = cv2.addWeighted(board, 0.65, warped, 0.35, 0)
         for pair in best["pairs"]:
             bx, by = map(int, pair["board_px"])
             px2, py2 = map(int, pair["projected_px"])
             cv2.line(reprojection, (bx, by), (px2, py2), (0, 0, 255), 2)
-        _write(debug / "back_02_reprojection_overlay.png", reprojection)
-        _json(debug / "back_02_reprojection_validation.json", {
+        _write(debug / "back_04_reprojection_overlay.png", reprojection)
+        _json(debug / "back_04_registration_validation.json", {
             "note": "Landmarks choose/validate an outline-derived transform; errors are independent of the four outline corners.",
             "errors_px": errors, "mean_error_px": best["mean_error_px"], "p95_error_px": p95,
             "threshold_px": threshold, "passed": bool(p95 <= threshold and score_margin >= 0.12),
+            "registration_selection": result["registration_selection"],
+            "edge_hole_refinement_validation": refinement_validation,
         })
         projection = board.copy()
         cv2.drawMarker(projection, (int(round(px)), int(round(py))), (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
         cv2.circle(projection, (int(round(px)), int(round(py))), max(30, int(0.025 * math.hypot(w, h))), (0, 165, 255), 2)
         cv2.putText(projection, "Projected TP - requires local pad verification", (max(5, int(px) + 20), max(28, int(py) - 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2)
-        _write(debug / "back_03_tp_projection.png", projection)
-        _write(debug / "back_04_tp_local_candidates.png", local_overlay)
-        _json(debug / "back_04_tp_local_candidates.json", local_evidence)
+        _write(debug / "back_05_tp_projection.png", projection)
+        _write(debug / "back_06_tp_local_candidates.png", local_overlay)
+        _json(debug / "back_06_tp_local_candidates.json", local_evidence)
         _json(debug / "back_registration_summary.json", result)
     return result
 

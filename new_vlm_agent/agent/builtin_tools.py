@@ -1828,15 +1828,15 @@ def _tool_prepare_back_board_landmark_candidates(
         from .back_board_registration import prepare_landmark_review
         locator = _resolve_read(locator_path)
         board = _resolve_read(back_board_path)
-        debug = _resolve_write(workspace, "debug/back_optional_candidate_classification.json").parent
+        debug = _resolve_write(workspace, "debug/back_02_edge_hole_candidates.json").parent
         summary = prepare_landmark_review(locator, board, debug)
     except Exception as e:  # noqa: BLE001
         return ToolResult(text=f"[back-landmark-candidates] failed: {e}", ok=False)
     return ToolResult(
         text=(
-            "Back-board landmark candidate sheets prepared for mandatory VLM semantic review.\n"
-            "View BOTH optional locator/photo candidate images (or the combined optional sheet), "
-            "then call record_back_landmark_review.\n"
+            "Back-board PCB-edge hole candidate sheets prepared for VLM semantic review.\n"
+            "Inspect the combined full-board + enlarged-crop sheet, then call record_back_landmark_review. "
+            "Use matches=[] when fewer than two reliable corresponding openings exist; registration will safely fall back.\n"
             f"locator_candidates={summary['locator_candidate_count']} "
             f"photo_candidates={summary['photo_candidate_count']}\n"
             f"combined_sheet={summary['candidate_sheet']}"
@@ -1850,16 +1850,16 @@ def _tool_record_back_landmark_review(
     matches: list[dict[str, Any]],
     overall_evidence: str,
     rejected_ids: list[str] | None = None,
-    out_path: str = "debug/back_vlm_landmark_review.json",
+    out_path: str = "debug/back_03_vlm_edge_hole_review.json",
 ) -> ToolResult:
     """Validate and persist VLM semantic landmark classifications/correspondences."""
     allowed = {"mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"}
-    if not isinstance(matches, list) or len(matches) < 2:
-        return ToolResult(text="[back-landmark-review] at least two matches are required; PCB corners remain the primary transform.", ok=False)
+    if not isinstance(matches, list) or len(matches) == 1:
+        return ToolResult(text="[back-landmark-review] provide either zero matches (safe fallback) or at least two reliable pairs.", ok=False)
     if not str(overall_evidence or "").strip():
         return ToolResult(text="[back-landmark-review] overall visual evidence is required.", ok=False)
     try:
-        candidate_path = _resolve_read("debug/back_optional_candidate_classification.json")
+        candidate_path = _resolve_read("debug/back_02_edge_hole_candidates.json")
         candidate_data = json.loads(candidate_path.read_text(encoding="utf-8"))
         valid_locator_ids = {
             str(item.get("id")) for key in ("accepted_by_cv", "rejected_by_cv")
@@ -1896,8 +1896,8 @@ def _tool_record_back_landmark_review(
             )
         if landmark_type not in allowed:
             return ToolResult(text=f"[back-landmark-review] match #{index} has unsupported landmark_type={landmark_type!r}.", ok=False)
-        if confidence < 0.55 or confidence > 1.0 or not evidence:
-            return ToolResult(text=f"[back-landmark-review] match #{index} needs confidence >=0.55 and visual evidence.", ok=False)
+        if confidence < 0.75 or confidence > 1.0 or not evidence:
+            return ToolResult(text=f"[back-landmark-review] match #{index} needs confidence >=0.75 and visual evidence.", ok=False)
         used_locator.add(locator_id)
         used_board.add(board_id)
         normalized.append({
@@ -1910,7 +1910,7 @@ def _tool_record_back_landmark_review(
         "overall_evidence": str(overall_evidence).strip(),
         "matches": normalized,
         "rejected_ids": [str(item) for item in (rejected_ids or [])],
-        "policy": "Solder pads, vias and TP pads are forbidden as global registration anchors.",
+        "policy": "Only PCB-edge mechanical openings are allowed. Solder pads, vias and TP pads are forbidden as global registration anchors.",
     }
     out = _resolve_write(workspace, out_path)
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1921,7 +1921,7 @@ def _tool_register_back_board_from_outline_and_holes(
     workspace: Path,
     locator_path: str = "debug/case10_assembly_drawing_tp_marked.png",
     back_board_path: str = "INPUT_PATHS.back_board_photo",
-    review_path: str = "debug/back_vlm_landmark_review.json",
+    review_path: str = "debug/back_03_vlm_edge_hole_review.json",
     out_json_path: str = "debug/back_board_registration.json",
     out_overlay_path: str = "debug/back_board_registration_overlay.png",
 ) -> ToolResult:
@@ -4114,8 +4114,8 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     reg.register(Tool(
         name="prepare_back_board_landmark_candidates",
         description=(
-            "Prepare numbered locator/photo candidate sheets for VLM semantic landmark review. "
-            "This tool does not register or map the TP. It only proposes candidates and writes debug evidence."
+            "After back_01 PCB rectangles, prepare numbered PCB-edge opening candidates and enlarged crops "
+            "for VLM semantic matching. This tool does not register or map the TP."
         ),
         parameters={
             "type": "object",
@@ -4131,20 +4131,20 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     reg.register(Tool(
         name="record_back_landmark_review",
         description=(
-            "After visually inspecting the numbered locator/photo candidate sheets, classify true mechanical "
-            "landmarks and record their one-to-one correspondence. Never select solder pads, vias or TP pads."
+            "After inspecting the PCB-edge candidate sheet, record zero pairs for safe rectangle fallback or at "
+            "least two high-confidence mechanical-opening correspondences. Never select pads, vias or TP pads."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "matches": {
-                    "type": "array", "minItems": 3,
+                    "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
                             "locator_id": {"type": "string"}, "board_id": {"type": "string"},
                             "landmark_type": {"type": "string", "enum": ["mounting_hole", "tooling_hole", "non_plated_hole", "fiducial", "board_cutout"]},
-                            "confidence": {"type": "number", "minimum": 0.55, "maximum": 1.0},
+                            "confidence": {"type": "number", "minimum": 0.75, "maximum": 1.0},
                             "evidence": {"type": "string"},
                         },
                         "required": ["locator_id", "board_id", "landmark_type", "confidence", "evidence"],
@@ -4187,21 +4187,19 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     reg.register(Tool(
         name="register_back_board_from_outline_and_holes",
         description=(
-            "Back-side registration path: detect the PCB outline and circular mounting/tooling holes "
-            "on the green-marked locator and the back board photo, fit a deterministic homography "
-            "mapping, and write the projected TP plus an evidence overlay. A prior "
-            "back_vlm_landmark_review.json with semantic one-to-one correspondences is mandatory. "
-            "Use this instead of largest-IC detection when target_board_side is back."
+            "Back-side-only registration: start from the PCB rectangle homography, optionally refine it with "
+            "VLM-reviewed PCB-edge holes when strict error gates improve, otherwise automatically retain the "
+            "original rectangle mapping. Use this instead of largest-IC detection for side=back."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "locator_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
                 "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
-                "review_path": {"type": "string", "default": "debug/back_vlm_landmark_review.json"},
+                "review_path": {"type": "string", "default": "debug/back_03_vlm_edge_hole_review.json"},
             },
         },
-        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png", back_board_path="INPUT_PATHS.back_board_photo", review_path="debug/back_vlm_landmark_review.json":
+        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png", back_board_path="INPUT_PATHS.back_board_photo", review_path="debug/back_03_vlm_edge_hole_review.json":
             _tool_register_back_board_from_outline_and_holes(
                 workspace=workspace,
                 locator_path=locator_path,

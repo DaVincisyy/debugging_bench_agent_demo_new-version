@@ -421,6 +421,22 @@ class Agent:
                     tool_t0 = time.time()
                     result_obj = self.registry.run(call.name, exec_arguments)
                     tool_dt = time.time() - tool_t0
+                    if call.name == "record_board_side_decision" and result_obj.ok:
+                        resolved_side = self._board_side_decision()
+                        if resolved_side in {"front", "back"}:
+                            # `auto` is a one-time router. Replace the mixed
+                            # discovery plan as soon as the physical side is known.
+                            plan_steps = self._workflow_plan_for_resolved_side(
+                                resolved_side
+                            )
+                            plan_idx = self._advance_plan_index(plan_steps, 0)
+                            last_plan_group = None
+                            messages.append(self.client.user_message(
+                                "[side-route-lock]\n"
+                                f"Physical board side is locked to `{resolved_side}`. "
+                                "The opposite-side workflow and tools are forbidden "
+                                "for the remainder of this run."
+                            ))
                     if call.name == "mark_tp_on_assembly_from_pdf_hit":
                         self._part0_mark_tp_calls += 1
                     finish_contract_errors: list[str] = []
@@ -956,10 +972,14 @@ class Agent:
                 continue
         if self._is_step3_premarked_case(inputs):
             return self._step3_premarked_workflow_plan()
-        if (
-            str(inputs.get("target_board_side", "")).strip().lower() == "auto"
-            or (isinstance(inputs.get("back_board_photo"), str) and str(inputs.get("back_board_photo")).strip())
-        ):
+        requested_side = str(inputs.get("target_board_side", "")).strip().lower()
+        if requested_side == "front":
+            return self._workflow_plan_for_resolved_side("front")
+        if requested_side == "back":
+            return self._workflow_plan_for_resolved_side("back")
+        if requested_side == "auto":
+            return self._auto_side_workflow_plan()
+        if isinstance(inputs.get("back_board_photo"), str) and str(inputs.get("back_board_photo")).strip():
             return self._auto_side_workflow_plan()
         return self._default_workflow_plan()
 
@@ -1181,6 +1201,29 @@ class Agent:
                 allowed_tools=["search_pdf_text", "mark_tp_on_assembly_from_pdf_hit", "pdf_page_to_image", "view_image", "run_python"],
             ),
             WorkflowPlanStep(
+                step_id="partback_vlm_landmarks",
+                title="Optional PCB-edge opening review",
+                objective=(
+                    "Inspect only PCB-edge mounting/tooling holes or cutouts. Record zero matches "
+                    "when ambiguous, or at least two high-confidence pairs. Rectangle mapping "
+                    "remains the safe base path."
+                ),
+                done_any_artifacts=[
+                    "debug/back_02_edge_hole_candidates.json",
+                    "debug/back_02_vlm_edge_hole_candidate_sheet.png",
+                    "debug/back_03_vlm_edge_hole_review.json",
+                ],
+                allowed_tools=[
+                    "prepare_back_board_landmark_candidates",
+                    "view_image",
+                    "record_back_landmark_review",
+                ],
+                next_action_hint=(
+                    "Prepare and inspect edge-opening candidates. Record reliable pairs, or "
+                    "matches=[] so registration keeps the rectangle mapping."
+                ),
+            ),
+            WorkflowPlanStep(
                 step_id="partback_board_registration",
                 title="Back board outline and hole registration",
                 objective="Do not detect a largest IC. Register the green-marked locator to INPUT_PATHS.back_board_photo using PCB outline and circular mounting/tooling holes.",
@@ -1219,16 +1262,16 @@ class Agent:
         plan.insert(2, side_step)
         plan.insert(3, WorkflowPlanStep(
             step_id="partback_vlm_landmarks",
-            title="VLM semantic review of back-board landmarks",
+            title="VLM semantic review of PCB-edge openings",
             objective=(
-                "For side=back, generate numbered locator/photo candidates, visually classify true mechanical "
-                "landmarks, and record at least two one-to-one correspondences using only IDs drawn on the sheet. "
-                "PCB corners are the primary transform; solder pads/vias are forbidden."
+                "For side=back, after the PCB rectangles are known, generate candidates only in the PCB edge band. "
+                "Match true mounting/tooling holes or board cutouts. Record zero pairs when ambiguous, or at least "
+                "two pairs with confidence >=0.75. Pads/vias are forbidden and rectangle fallback is mandatory."
             ),
             done_any_artifacts=[
-                "debug/back_optional_candidate_classification.json",
-                "debug/back_optional_vlm_candidate_sheet.png",
-                "debug/back_vlm_landmark_review.json",
+                "debug/back_02_edge_hole_candidates.json",
+                "debug/back_02_vlm_edge_hole_candidate_sheet.png",
+                "debug/back_03_vlm_edge_hole_review.json",
             ],
             allowed_tools=[
                 "prepare_back_board_landmark_candidates",
@@ -1236,8 +1279,8 @@ class Agent:
                 "record_back_landmark_review",
             ],
             next_action_hint=(
-                "If side=back, call prepare_back_board_landmark_candidates, inspect the combined and separate "
-                "candidate sheets, then call record_back_landmark_review with semantic evidence for each pair."
+                "If side=back, prepare and inspect the combined edge-hole candidate sheet. Record reliable semantic "
+                "pairs, or matches=[] with evidence when uncertain so rectangle mapping remains unchanged."
             ),
         ))
         plan[-1] = WorkflowPlanStep(
@@ -1258,11 +1301,21 @@ class Agent:
             ],
             next_action_hint=(
                 "If side=back, call register_back_board_from_outline_and_holes then "
-                "emit_step08_from_back_board_registration. The registration tool requires the VLM review JSON. "
+                "emit_step08_from_back_board_registration. The review JSON is advisory and strict-gated. "
                 "If side=front, use the existing case12 IC path."
             ),
         )
         return plan
+
+    @staticmethod
+    def _workflow_plan_for_resolved_side(side: str) -> list[WorkflowPlanStep]:
+        """Return a physically isolated plan after the one-time auto decision."""
+        normalized = str(side or "").strip().lower()
+        if normalized == "front":
+            return Agent._default_workflow_plan()
+        if normalized == "back":
+            return Agent._back_board_workflow_plan()
+        raise ValueError(f"Unsupported resolved board side: {side!r}")
 
     def _artifact_exists(self, rel: str) -> bool:
         ws = self.cfg.workspace_dir.resolve()
@@ -1329,7 +1382,6 @@ class Agent:
         if self._board_side_decision() == "back" and step.step_id in {
             "partb_locator_largest_ic",
             "parta_board_largest_ic",
-            "partback_vlm_landmarks",
         }:
             return True
         if self._board_side_decision() == "front" and step.step_id == "partback_vlm_landmarks":
@@ -1355,6 +1407,8 @@ class Agent:
         sid = (step_id or "").lower()
         if sid.startswith("part0"):
             return "part0"
+        if sid.startswith("partback"):
+            return "partBack"
         if sid.startswith("partb"):
             return "partB"
         if sid.startswith("parta"):
@@ -1509,22 +1563,70 @@ class Agent:
             pass
         return None
 
+    def _validate_resolved_side_artifacts(self) -> list[str]:
+        """Reject artifacts produced by the opposite physical-side workflow."""
+        side = self._board_side_decision()
+        if side not in {"front", "back"}:
+            return []
+        errors: list[str] = []
+        ws = self.cfg.workspace_dir.resolve()
+        step08 = self._path_first_existing([
+            ws / "debug/step08_result.json",
+            ws / "workspace/debug/step08_result.json",
+        ])
+        mapping = self._path_first_existing([
+            ws / "debug/step03_mapping.json",
+            ws / "workspace/debug/step03_mapping.json",
+        ])
+        camera_view: str | None = None
+        mapping_method: str | None = None
+        if step08 is not None:
+            try:
+                value = json.loads(step08.read_text(encoding="utf-8")).get("camera_view")
+                camera_view = str(value).strip().lower() if value is not None else None
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Invalid step08 side metadata: {exc}")
+        if mapping is not None:
+            try:
+                value = json.loads(mapping.read_text(encoding="utf-8")).get("mapping_method")
+                mapping_method = str(value).strip() if value is not None else None
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Invalid mapping side metadata: {exc}")
+
+        if camera_view and camera_view != side:
+            errors.append(
+                f"step08 camera_view={camera_view!r} conflicts with locked side={side!r}."
+            )
+        is_back_mapping = mapping_method == "back_board_outline_holes"
+        if side == "front" and is_back_mapping:
+            errors.append("Front side cannot use back_board_outline_holes mapping.")
+        if side == "back" and mapping_method and not is_back_mapping:
+            errors.append(
+                f"Back side cannot use front mapping_method={mapping_method!r}."
+            )
+        return errors
+
     def _force_submit_at_max_steps(self, result: Any) -> bool:
         if result.final_answer is not None:
             return False
         pixel = self._read_step08_pixel()
         has_step8_png = self._artifact_exists("debug/step08_final_tp.png")
         has_step8_json = self._artifact_exists("debug/step08_result.json")
-        complete = bool(pixel and has_step8_png and has_step8_json)
+        side_errors = self._validate_resolved_side_artifacts()
+        complete = bool(pixel and has_step8_png and has_step8_json and not side_errors)
         answer: dict[str, Any] = {
             "needs_user_help": not complete,
             "forced_submit": True,
             "max_steps": self.cfg.max_steps,
         }
-        if pixel is not None:
+        locked_side = self._board_side_decision()
+        if locked_side in {"front", "back"}:
+            answer["camera_view"] = locked_side
+        if pixel is not None and not side_errors:
             answer["pixel"] = pixel
         answer["user_message"] = (
             f"Reached max_steps={self.cfg.max_steps}; submitting best-effort result."
+            + (" Side consistency failed: " + "; ".join(side_errors) if side_errors else "")
         )
         result.final_answer = answer
         self.console.print(Panel.fit(
@@ -1645,21 +1747,40 @@ class Agent:
         plan_steps: list[WorkflowPlanStep],
         plan_idx: int,
     ) -> str | None:
-        if plan_idx >= len(plan_steps):
-            return None
-        current = plan_steps[plan_idx]
-        current_id = current.step_id
         tool = call.name
         side = self._board_side_decision()
-        if current_id == "partd_case12_align_and_finish" and side == "back" and tool in {
+        front_only_tools = {
             "case12_build_and_align_from_step02_anchors",
             "emit_step08_from_case12_aligned",
-        }:
+            "detect_largest_ic_on_assembly_from_vlm_hint",
+            "detect_largest_ic_on_board_full",
+            "detect_largest_ic_on_board_from_vlm_hint",
+        }
+        back_only_tools = {
+            "prepare_back_board_landmark_candidates",
+            "record_back_landmark_review",
+            "register_back_board_from_outline_and_holes",
+            "emit_step08_from_back_board_registration",
+        }
+        if side == "back" and tool in front_only_tools:
             return (
                 "[side-guard] side=back: front/case12 IC-anchor tools are forbidden. "
                 "Use register_back_board_from_outline_and_holes, then "
                 "emit_step08_from_back_board_registration."
             )
+        if side == "front" and tool in back_only_tools:
+            return (
+                "[side-guard] side=front: back-board outline/hole tools are forbidden. "
+                "Use the largest-IC anchor path only."
+            )
+
+        # The physical-side lock is a run-wide safety invariant.  Keep it
+        # above the completed-plan return: a model can still emit a stale or
+        # hallucinated tool call after the planner reaches its final index.
+        if plan_idx >= len(plan_steps):
+            return None
+        current = plan_steps[plan_idx]
+        current_id = current.step_id
 
         # Compact workflow: Part0 quickstart is already in ## Task.
         if (
@@ -2974,6 +3095,15 @@ class Agent:
         if answer.get("needs_user_help") is True:
             return errors
 
+        locked_side = self._board_side_decision()
+        answer_side = str(answer.get("camera_view", "")).strip().lower()
+        if locked_side in {"front", "back"} and answer_side != locked_side:
+            errors.append(
+                "finish.answer.camera_view must match the locked board side "
+                f"({locked_side}); got {answer_side or 'missing'}."
+            )
+        errors.extend(self._validate_resolved_side_artifacts())
+
         pixel = answer.get("pixel")
         if not (isinstance(pixel, list) and len(pixel) == 2):
             errors.append(
@@ -3437,11 +3567,14 @@ class Agent:
             "debug/back_board_registration_overlay.png",
             "debug/back_01_locator_outline.png",
             "debug/back_01_photo_outline.png",
-            "debug/back_02_reprojection_overlay.png",
-            "debug/back_02_reprojection_validation.json",
-            "debug/back_03_tp_projection.png",
-            "debug/back_04_tp_local_candidates.png",
-            "debug/back_04_tp_local_candidates.json",
+            "debug/back_02_edge_hole_candidates.json",
+            "debug/back_02_vlm_edge_hole_candidate_sheet.png",
+            "debug/back_03_vlm_edge_hole_review.json",
+            "debug/back_04_reprojection_overlay.png",
+            "debug/back_04_registration_validation.json",
+            "debug/back_05_tp_projection.png",
+            "debug/back_06_tp_local_candidates.png",
+            "debug/back_06_tp_local_candidates.json",
             "debug/step03_mapping.json",
             "debug/step08_final_tp.png",
             "debug/step08_result.json",
@@ -3458,6 +3591,8 @@ class Agent:
             ws / "workspace/debug/step08_result.json",
         ])
         review_file = self._path_first_existing([
+            ws / "debug/back_03_vlm_edge_hole_review.json",
+            ws / "workspace/debug/back_03_vlm_edge_hole_review.json",
             ws / "debug/back_vlm_landmark_review.json",
             ws / "workspace/debug/back_vlm_landmark_review.json",
         ])
@@ -3467,8 +3602,11 @@ class Agent:
                 if review.get("review_source") != "vlm_visual_semantic_review":
                     errors.append("Back landmark review must come from VLM visual semantic review.")
                 matches = review.get("matches")
-                if not isinstance(matches, list) or len(matches) < 2:
-                    errors.append("Back landmark review must contain at least two semantic matches.")
+                if not isinstance(matches, list) or len(matches) == 1:
+                    errors.append("Back landmark review must contain zero matches for fallback or at least two semantic matches.")
+                for match in matches or []:
+                    if float(match.get("confidence", 0.0)) < 0.75:
+                        errors.append("Back edge-hole matches require VLM confidence >= 0.75.")
             except Exception as e:  # noqa: BLE001
                 errors.append(f"Invalid back VLM landmark review: {e}")
         if registration is not None and final is not None:
@@ -3502,6 +3640,9 @@ class Agent:
         """Check required debug artifacts before accepting finish() (no progress/*.md gate)."""
         errors: list[str] = []
         ws = self.cfg.workspace_dir.resolve()
+        side_errors = self._validate_resolved_side_artifacts()
+        if side_errors:
+            return side_errors
 
         # Step 3 mapping evidence must be machine-generated.
         mapping_json_candidates = [

@@ -6,10 +6,141 @@ import json
 import os
 import sys
 import tempfile
+import base64
+import io
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
+
+
+def test_oversized_image_data_url_is_compressed_without_touching_source(tmp_path, monkeypatch):
+    from PIL import Image
+    from agent.utils import encode_image_data_url
+
+    source = tmp_path / "large.png"
+    Image.effect_noise((1800, 1200), 100).convert("RGB").save(source, format="PNG")
+    original = source.read_bytes()
+    monkeypatch.setenv("VLM_IMAGE_DATA_URI_MAX_BYTES", str(300 * 1024))
+
+    data_url = encode_image_data_url(source)
+
+    assert data_url.startswith("data:image/jpeg;base64,")
+    assert len(data_url.encode("utf-8")) <= 300 * 1024
+    assert source.read_bytes() == original
+    encoded = data_url.split(",", 1)[1]
+    with Image.open(io.BytesIO(base64.b64decode(encoded))) as attached:
+        attached.verify()
+
+
+def test_resolved_side_plans_are_physically_isolated():
+    from agent.agent import Agent
+
+    front = Agent._workflow_plan_for_resolved_side("front")
+    back = Agent._workflow_plan_for_resolved_side("back")
+    front_tools = {tool for step in front for tool in step.allowed_tools}
+    back_tools = {tool for step in back for tool in step.allowed_tools}
+
+    assert "case12_build_and_align_from_step02_anchors" in front_tools
+    assert "register_back_board_from_outline_and_holes" not in front_tools
+    assert "detect_largest_ic_on_board_full" not in back_tools
+    assert "case12_build_and_align_from_step02_anchors" not in back_tools
+    assert "register_back_board_from_outline_and_holes" in back_tools
+    assert "prepare_back_board_landmark_candidates" in back_tools
+
+
+def test_explicit_board_side_bypasses_auto_even_when_both_photos_exist(tmp_path):
+    from rich.console import Console
+
+    from agent.agent import Agent
+    from agent.config import Config
+
+    agent = Agent(
+        Config(
+            base_url="http://localhost:0",
+            api_key="sk",
+            model="mock",
+            workspace_dir=tmp_path,
+        ),
+        console=Console(force_terminal=False, width=120),
+    )
+    common = {"front_board_photo": "front.jpg", "back_board_photo": "back.jpg"}
+    front = agent._build_workflow_plan({**common, "target_board_side": "front"})
+    back = agent._build_workflow_plan({**common, "target_board_side": "back"})
+
+    assert all(step.step_id != "partside_locator_decision" for step in front)
+    assert all(step.step_id != "partside_locator_decision" for step in back)
+    assert any(step.step_id == "parta_board_largest_ic" for step in front)
+    assert all(step.step_id != "parta_board_largest_ic" for step in back)
+
+
+def test_side_guard_blocks_opposite_geometry_tools(tmp_path):
+    from rich.console import Console
+
+    from agent.agent import Agent
+    from agent.config import Config
+    from agent.llm_client import ToolInvocation
+
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    cfg = Config(
+        base_url="http://localhost:0",
+        api_key="sk",
+        model="mock",
+        workspace_dir=tmp_path,
+    )
+    agent = Agent(cfg, console=Console(force_terminal=False, width=120))
+    mixed = agent._auto_side_workflow_plan()
+    partd_idx = next(i for i, step in enumerate(mixed) if step.step_id == "partd_case12_align_and_finish")
+
+    (debug / "board_side_decision.json").write_text(
+        json.dumps({"side": "front"}), encoding="utf-8"
+    )
+    back_call = ToolInvocation(
+        id="back", name="register_back_board_from_outline_and_holes", arguments={}
+    )
+    assert "side=front" in agent._is_call_blocked_by_plan(back_call, mixed, partd_idx)
+    assert "side=front" in agent._is_call_blocked_by_plan(
+        back_call, mixed, len(mixed)
+    )
+
+    (debug / "board_side_decision.json").write_text(
+        json.dumps({"side": "back"}), encoding="utf-8"
+    )
+    front_call = ToolInvocation(
+        id="front", name="case12_build_and_align_from_step02_anchors", arguments={}
+    )
+    assert "side=back" in agent._is_call_blocked_by_plan(front_call, mixed, partd_idx)
+    assert "side=back" in agent._is_call_blocked_by_plan(
+        front_call, mixed, len(mixed)
+    )
+
+
+def test_finish_rejects_camera_view_opposite_to_locked_side(tmp_path):
+    from rich.console import Console
+
+    from agent.agent import Agent
+    from agent.config import Config
+
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    (debug / "board_side_decision.json").write_text(
+        json.dumps({"side": "front"}), encoding="utf-8"
+    )
+    agent = Agent(
+        Config(
+            base_url="http://localhost:0",
+            api_key="sk",
+            model="mock",
+            workspace_dir=tmp_path,
+        ),
+        console=Console(force_terminal=False, width=120),
+    )
+
+    errors = agent._validate_finish_answer({
+        "camera_view": "back", "pixel": [10, 20], "needs_user_help": False,
+    })
+    assert any("locked board side" in error for error in errors)
 
 
 def test_missing_env_raises():

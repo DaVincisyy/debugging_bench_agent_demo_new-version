@@ -199,11 +199,35 @@ def _detect_green_tp_center(bgr: np.ndarray) -> tuple[float, float, float] | Non
 
     Uses the same HSV band as ``crop_green_tp_neighborhood_on_locator`` / Step3 mapping,
     plus BGR fallbacks for ``cv2.circle(..., (0,255,0))`` strokes and hollow rings.
+
+    If the standard morph-open'd mask yields too few pixels (e.g. thin circle on PDF raster),
+    falls back to a close-only mask to avoid over-erosion of the green stroke.
     """
     mask = _green_tp_mask_bgr(bgr)
+    # ---- fallback: close-only mask for thin green circles ----
+    mask_close_only: np.ndarray | None = None
     if int(mask.sum()) < 40:
-        return None
+        mask_close_only = _green_tp_mask_close_only(bgr)
+        if int(mask_close_only.sum()) >= 40:
+            mask = mask_close_only
 
+    result = _extract_green_tp_from_mask(mask)
+    if result is not None:
+        return result
+
+    # Retry with close-only fallback when the open(3x3) eroded a thin circle
+    if mask_close_only is None:
+        mask_close_only = _green_tp_mask_close_only(bgr)
+    if mask_close_only is not None and int(mask_close_only.sum()) >= 40:
+        result = _extract_green_tp_from_mask(mask_close_only)
+        if result is not None:
+            return result
+
+    return None
+
+
+def _extract_green_tp_from_mask(mask: np.ndarray) -> tuple[float, float, float] | None:
+    """Given a binary mask, try to find the largest green-TP circle and return (cx, cy, r)."""
     n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
         mask, connectivity=8
     )
@@ -229,6 +253,19 @@ def _detect_green_tp_center(bgr: np.ndarray) -> tuple[float, float, float] | Non
     (cx, cy), rad = cv2.minEnclosingCircle(best)
     return float(cx), float(cy), float(max(rad, 4.0))
 
+
+def _green_tp_mask_close_only(bgr: np.ndarray) -> np.ndarray:
+    """Same colour bands as ``_green_tp_mask_bgr`` but close-only (no open) to preserve thin strokes."""
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    m_hsv = cv2.inRange(hsv, np.array([40, 100, 100]), np.array([80, 255, 255]))
+    b_ch, g_ch, r_ch = cv2.split(bgr)
+    m_dom = ((g_ch > 100) & (r_ch < 160) & (b_ch < 160) & (g_ch > r_ch + 20) & (g_ch > b_ch + 20)).astype(np.uint8) * 255
+    m_pure = ((g_ch >= 200) & (r_ch <= 80) & (b_ch <= 80)).astype(np.uint8) * 255
+    mask = cv2.bitwise_or(m_hsv, m_dom)
+    mask = cv2.bitwise_or(mask, m_pure)
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_close)
+    return mask
 
 def _polar_from_tp(
     tp_xy: tuple[float, float], pt_xy: tuple[float, float]

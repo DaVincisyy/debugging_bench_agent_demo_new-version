@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import mimetypes
 import os
 from pathlib import Path
@@ -19,13 +20,10 @@ def encode_image_data_url(
 ) -> str:
     """Return a ``data:image/...;base64,...`` URL for a local image file.
 
-    Lynn / workflow pattern: images are attached only when a step calls
-    ``view_image`` (or a tool returns ``ToolResult.images``). Files are sent
-    as-is (no downscale, no JPEG re-encode); PNG stays PNG, JPEG stays JPEG.
-    ``max_pixels`` / ``jpeg_quality`` are accepted for call-site compatibility
-    but intentionally ignored.
+    Images that already fit the provider's per-data-URI limit are sent as-is.
+    Oversized images are JPEG-encoded in memory and, only when necessary,
+    progressively downscaled. The original debug artifact is never modified.
     """
-    _ = max_pixels, jpeg_quality
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Image not found: {p}")
@@ -37,8 +35,41 @@ def encode_image_data_url(
             im.verify()
     except Exception as exc:
         raise ValueError(f"Unreadable image file: {p}") from exc
-    b64 = base64.b64encode(p.read_bytes()).decode("ascii")
-    return f"data:{mime};base64,{b64}"
+
+    max_data_uri_bytes = int(
+        os.environ.get("VLM_IMAGE_DATA_URI_MAX_BYTES", str(19 * 1024 * 1024))
+    )
+    raw = p.read_bytes()
+    data_url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    if max_data_uri_bytes <= 0 or len(data_url.encode("utf-8")) <= max_data_uri_bytes:
+        return data_url
+
+    quality = int(jpeg_quality or os.environ.get("VLM_AGENT_JPEG_QUALITY", "85"))
+    with Image.open(p) as source:
+        image = source.convert("RGB")
+        if max_pixels is not None:
+            image = _downscale_pil(image, int(max_pixels))
+
+        # JPEG usually removes enough PNG overhead by itself. If it does not,
+        # shrink in proportion to the remaining byte excess until it fits.
+        for _ in range(8):
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG", quality=quality, optimize=True)
+            encoded = base64.b64encode(buf.getvalue()).decode("ascii")
+            data_url = f"data:image/jpeg;base64,{encoded}"
+            current_bytes = len(data_url.encode("utf-8"))
+            if current_bytes <= max_data_uri_bytes:
+                return data_url
+            ratio = min(0.9, (max_data_uri_bytes / float(current_bytes)) ** 0.5 * 0.95)
+            width = max(1, int(image.width * ratio))
+            height = max(1, int(image.height * ratio))
+            if (width, height) == image.size:
+                break
+            image = image.resize((width, height), Image.LANCZOS)
+
+    raise ValueError(
+        f"Unable to encode image below data-URI limit ({max_data_uri_bytes} bytes): {p}"
+    )
 
 
 def _debug_max_pixels() -> int:
