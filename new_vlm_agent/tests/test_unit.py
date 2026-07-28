@@ -33,7 +33,7 @@ def test_oversized_image_data_url_is_compressed_without_touching_source(tmp_path
         attached.verify()
 
 
-def test_resolved_side_plans_are_physically_isolated():
+def test_resolved_side_plans_share_outline_holes_and_disable_ic():
     from agent.agent import Agent
 
     front = Agent._workflow_plan_for_resolved_side("front")
@@ -41,15 +41,288 @@ def test_resolved_side_plans_are_physically_isolated():
     front_tools = {tool for step in front for tool in step.allowed_tools}
     back_tools = {tool for step in back for tool in step.allowed_tools}
 
-    assert "case12_build_and_align_from_step02_anchors" in front_tools
-    assert "register_back_board_from_outline_and_holes" not in front_tools
-    assert "detect_largest_ic_on_board_full" not in back_tools
-    assert "case12_build_and_align_from_step02_anchors" not in back_tools
-    assert "register_back_board_from_outline_and_holes" in back_tools
-    assert "prepare_back_board_landmark_candidates" in back_tools
+    for tools in (front_tools, back_tools):
+        assert "register_back_board_from_outline_and_holes" in tools
+        assert "prepare_back_board_landmark_candidates" in tools
+        assert "emit_step08_from_back_board_registration" in tools
+        assert "detect_largest_ic_on_board_full" not in tools
+        assert "detect_largest_ic_on_assembly_from_vlm_hint" not in tools
+        assert "case12_build_and_align_from_step02_anchors" not in tools
 
 
-def test_explicit_board_side_bypasses_auto_even_when_both_photos_exist(tmp_path):
+def test_photo_board_contour_accepts_red_solder_mask():
+    import cv2
+    import numpy as np
+
+    from agent.back_board_registration import _board_contour
+
+    image = np.full((900, 1200, 3), 155, dtype=np.uint8)
+    cv2.rectangle(image, (150, 120), (1050, 780), (25, 25, 185), thickness=-1)
+    contour, _mask, metrics = _board_contour(image, domain="photo")
+
+    assert cv2.contourArea(contour) > image.shape[0] * image.shape[1] * 0.4
+    assert metrics["valid"] is True
+    assert metrics["method"] == "chromatic_solder_mask"
+
+
+def test_photo_board_contour_excludes_saturated_green_border_background():
+    import cv2
+    import numpy as np
+
+    from agent.back_board_registration import _board_contour
+
+    image = np.full((900, 1200, 3), (105, 125, 20), dtype=np.uint8)
+    cv2.rectangle(image, (180, 120), (1020, 780), (25, 25, 185), thickness=-1)
+    contour, _mask, metrics = _board_contour(image, domain="photo")
+    x, y, width, height = cv2.boundingRect(contour)
+
+    assert metrics["valid"] is True
+    assert metrics["method"] == "border_hue_contrast"
+    assert x > 100 and y > 70
+    assert x + width < 1100 and y + height < 850
+
+
+def test_photo_board_contour_trims_low_support_connector_pins_to_locator_aspect():
+    import cv2
+    import numpy as np
+
+    from agent.back_board_registration import _board_contour, _contour_aspect_ratio
+
+    image = np.full((900, 1300, 3), 155, dtype=np.uint8)
+    cv2.rectangle(image, (180, 180), (830, 680), (25, 25, 185), thickness=-1)
+    # Three gold connector rows protrude only from the right-hand edge.
+    for y in (260, 420, 580):
+        cv2.rectangle(image, (820, y - 28), (890, y + 28), (20, 130, 210), thickness=-1)
+        for offset in (0, 22, 44):
+            cv2.line(image, (890, y - 22 + offset), (1030, y - 22 + offset), (20, 150, 220), thickness=9)
+
+    contour, _mask, metrics = _board_contour(
+        image,
+        domain="photo",
+        expected_aspect_ratio=1.3,
+    )
+    x, y, width, height = cv2.boundingRect(contour)
+    refinement = metrics["photo_body_refinement"]
+
+    assert refinement["applied"] is True
+    assert refinement["trim_side"] == "right"
+    assert x < 200 and x + width < 930
+    assert abs(_contour_aspect_ratio(contour) - 1.3) < 0.02
+
+
+def test_locator_board_contour_prefers_internal_rectangle_over_pdf_page_frame():
+    import cv2
+    import numpy as np
+
+    from agent.back_board_registration import _board_contour
+
+    image = np.full((1000, 1400, 3), 255, dtype=np.uint8)
+    cv2.rectangle(image, (20, 20), (1380, 980), (40, 40, 40), thickness=4)
+    cv2.line(image, (20, 850), (1380, 850), (40, 40, 40), thickness=4)
+    cv2.rectangle(image, (320, 130), (920, 780), (70, 70, 70), thickness=5)
+    for x in range(380, 880, 90):
+        cv2.rectangle(image, (x, 250), (x + 35, 300), (80, 80, 80), thickness=3)
+
+    contour, _mask, metrics = _board_contour(image, domain="locator")
+    x, y, width, height = cv2.boundingRect(contour)
+
+    assert metrics["valid"] is True
+    assert metrics["method"] == "internal_faint_line_rectangle"
+    assert 280 <= x <= 340 and 100 <= y <= 150
+    assert 580 <= width <= 640 and 630 <= height <= 680
+
+
+def test_locator_board_contour_excludes_balanced_top_bottom_auxiliary_rails():
+    import cv2
+    import numpy as np
+
+    from agent.back_board_registration import _board_contour
+
+    image = np.full((1100, 1400, 3), 255, dtype=np.uint8)
+    # Outer panel envelope with equal-height tooling rails above and below.
+    cv2.rectangle(image, (280, 100), (1080, 1000), (55, 55, 55), thickness=4)
+    # Physical PCB body. Its right edge stops before the protruding connector.
+    cv2.rectangle(image, (282, 210), (970, 890), (65, 65, 65), thickness=5)
+    cv2.line(image, (970, 500), (1080, 500), (65, 65, 65), thickness=4)
+    for y in range(280, 820, 100):
+        for x in range(360, 900, 120):
+            cv2.rectangle(image, (x, y), (x + 35, y + 45), (85, 85, 85), thickness=3)
+    cv2.circle(image, (600, 540), 14, (0, 255, 0), thickness=5)
+
+    contour, _mask, metrics = _board_contour(image, domain="locator")
+    x, y, width, height = cv2.boundingRect(contour)
+
+    assert metrics["valid"] is True
+    assert metrics["selection_method"] == "nested_inner_rectangle_over_auxiliary_frame"
+    assert metrics["auxiliary_frame_outer_bbox_xywh"] is not None
+    assert 270 <= x <= 300 and 195 <= y <= 225
+    assert 670 <= width <= 710 and 660 <= height <= 700
+    assert sum(item["selected"] for item in metrics["candidate_summaries"]) == 1
+
+
+def test_back_landmark_candidate_failure_creates_safe_empty_fallback(tmp_path, monkeypatch):
+    from PIL import Image
+
+    import agent.back_board_registration as registration
+    from agent.builtin_tools import (
+        _tool_prepare_back_board_landmark_candidates,
+        _tool_record_back_landmark_review,
+        set_runtime_context,
+    )
+
+    locator = tmp_path / "locator.png"
+    board = tmp_path / "board.png"
+    Image.new("RGB", (80, 60), "white").save(locator)
+    Image.new("RGB", (80, 60), "white").save(board)
+
+    def fail_prepare(*_args, **_kwargs):
+        raise ValueError("synthetic outline failure")
+
+    monkeypatch.setattr(registration, "prepare_landmark_review", fail_prepare)
+    set_runtime_context(
+        project_root=tmp_path,
+        workspace=tmp_path,
+        input_paths={"back_board_photo": str(board)},
+    )
+    result = _tool_prepare_back_board_landmark_candidates(
+        tmp_path,
+        locator_path=str(locator),
+        back_board_path=str(board),
+    )
+    review = _tool_record_back_landmark_review(
+        tmp_path,
+        matches=[],
+        overall_evidence="CV candidate generation failed; use outline-only fallback.",
+    )
+
+    payload = json.loads((tmp_path / "debug/back_02_edge_hole_candidates.json").read_text(encoding="utf-8"))
+    assert result.ok is True
+    assert payload["locator"]["accepted_by_cv"] == []
+    assert payload["photo"]["accepted_by_cv"] == []
+    assert "synthetic outline failure" in payload["fallback_reason"]
+    assert (tmp_path / "debug/back_02_vlm_edge_hole_candidate_sheet.png").is_file()
+    assert review.ok is True
+    assert (tmp_path / "debug/back_03_vlm_edge_hole_review.json").is_file()
+
+
+def test_pdf_tp_search_strictly_filters_to_requested_locator_page(tmp_path):
+    import fitz
+
+    from agent.builtin_tools import _tool_search_pdf_text, set_runtime_context
+
+    pdf = tmp_path / "assembly.pdf"
+    doc = fitz.open()
+    for page_number in (1, 2):
+        page = doc.new_page(width=600, height=800)
+        page.insert_text((100 + page_number * 40, 200), "TP12", fontsize=18)
+    doc.save(pdf)
+    doc.close()
+
+    set_runtime_context(project_root=tmp_path, workspace=tmp_path)
+    result = _tool_search_pdf_text(
+        tmp_path,
+        str(pdf),
+        "TP12",
+        out_json_path="debug/search.json",
+        page_filter=[2],
+        page_filter_reason="target_board_side=back",
+    )
+    payload = json.loads((tmp_path / "debug/search.json").read_text(encoding="utf-8"))
+
+    assert result.ok is True
+    assert payload["page_filter"] == [2]
+    assert payload["hit_pages"] == [2]
+    assert payload["hit_count"] == 1
+    assert all(hit["page"] == 2 for hit in payload["hits"])
+
+
+def test_assembly_search_uses_explicit_locator_page_then_side_default(tmp_path):
+    from rich.console import Console
+
+    from agent.agent import Agent
+    from agent.config import Config
+
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    (debug / "case10_signal_to_tp.json").write_text(
+        json.dumps({
+            "target_points": [{
+                "tp_id": "TP11",
+                "board_side": "back",
+                "locator_page": 2,
+            }]
+        }),
+        encoding="utf-8",
+    )
+    agent = Agent(
+        Config(
+            base_url="http://localhost:0",
+            api_key="sk",
+            model="mock",
+            workspace_dir=tmp_path,
+        ),
+        console=Console(force_terminal=False, width=120),
+    )
+    agent._run_inputs = {
+        "assembly_drawing_pdf": str(tmp_path / "assembly.pdf"),
+        "target_board_side": "back",
+    }
+
+    explicit = agent._build_assembly_search_args_from_signal()
+    assert explicit["query"] == "TP11"
+    assert explicit["page_filter"] == [2]
+    assert "target_board_side=back" in explicit["page_filter_reason"]
+
+    (debug / "case10_signal_to_tp.json").write_text(
+        json.dumps({"tp_id_or_ref": "TP12", "board_side": "back"}),
+        encoding="utf-8",
+    )
+    fallback = agent._build_assembly_search_args_from_signal()
+    assert fallback["query"] == "TP12"
+    assert fallback["page_filter"] == [2]
+    assert "target_board_side=back" in fallback["page_filter_reason"]
+
+    (debug / "case10_signal_to_tp.json").write_text(
+        json.dumps({"tp_id_or_ref": "TP9"}),
+        encoding="utf-8",
+    )
+    agent._run_inputs["target_board_side"] = "front"
+    front = agent._build_assembly_search_args_from_signal()
+    assert front["query"] == "TP9"
+    assert front["page_filter"] == [1]
+    assert "target_board_side=front" in front["page_filter_reason"]
+
+    (debug / "case10_signal_to_tp.json").write_text(
+        json.dumps({
+            "tp_id_or_ref": "TP9",
+            "board_side": "back",
+            "locator_page": 2,
+        }),
+        encoding="utf-8",
+    )
+    forced_front = agent._build_assembly_search_args_from_signal()
+    assert forced_front["page_filter"] == [1]
+    assert "authoritative target_board_side=front" in forced_front["page_filter_reason"]
+
+
+def test_planner_model_is_resolved_from_runtime_config(monkeypatch):
+    from agent.config import Config
+    from agent.planner import _resolve_planner_model
+
+    cfg = Config(
+        base_url="http://localhost:0",
+        api_key="sk",
+        model="qwen3.7-plus",
+    )
+
+    monkeypatch.delenv("PLANNER_MODEL", raising=False)
+    assert _resolve_planner_model(cfg) == "qwen3.7-plus"
+
+    monkeypatch.setenv("PLANNER_MODEL", "glm-5.2")
+    assert _resolve_planner_model(cfg) == "glm-5.2"
+
+
+def test_explicit_board_side_selects_physically_isolated_plan(tmp_path):
     from rich.console import Console
 
     from agent.agent import Agent
@@ -70,11 +343,33 @@ def test_explicit_board_side_bypasses_auto_even_when_both_photos_exist(tmp_path)
 
     assert all(step.step_id != "partside_locator_decision" for step in front)
     assert all(step.step_id != "partside_locator_decision" for step in back)
-    assert any(step.step_id == "parta_board_largest_ic" for step in front)
+    assert any(step.step_id == "partback_board_registration" for step in front)
+    assert any(step.step_id == "partback_board_registration" for step in back)
+    assert all(step.step_id != "parta_board_largest_ic" for step in front)
     assert all(step.step_id != "parta_board_largest_ic" for step in back)
+    assert any("INPUT_PATHS.front_board_photo" in step.objective for step in front)
+    assert any("INPUT_PATHS.back_board_photo" in step.objective for step in back)
+
+    front_prompt = agent._message_text(
+        agent._initial_messages(
+            "Locate TP9.",
+            {**common, "target_board_side": "front"},
+        )[1]["content"]
+    )
+    assert "Search only the TOP/page 1 assembly locator page" in front_prompt
+    assert "Register only onto `INPUT_PATHS.front_board_photo`" in front_prompt
+    assert "IC-anchor tools remain installed but are forbidden" in front_prompt
+
+    auto = agent._build_workflow_plan({**common, "target_board_side": "auto"})
+    assert any(step.step_id == "partside_locator_decision" for step in auto)
+    assert all(step.step_id != "parta_board_largest_ic" for step in auto)
+
+    implicit_front = agent._build_workflow_plan({"front_board_photo": "front.jpg"})
+    assert any(step.step_id == "partback_board_registration" for step in implicit_front)
+    assert all(step.step_id != "parta_board_largest_ic" for step in implicit_front)
 
 
-def test_side_guard_blocks_opposite_geometry_tools(tmp_path):
+def test_side_guard_allows_outline_tools_and_blocks_ic_on_both_sides(tmp_path):
     from rich.console import Console
 
     from agent.agent import Agent
@@ -90,30 +385,143 @@ def test_side_guard_blocks_opposite_geometry_tools(tmp_path):
         workspace_dir=tmp_path,
     )
     agent = Agent(cfg, console=Console(force_terminal=False, width=120))
-    mixed = agent._auto_side_workflow_plan()
-    partd_idx = next(i for i, step in enumerate(mixed) if step.step_id == "partd_case12_align_and_finish")
+    common = {"front_board_photo": "front.jpg", "back_board_photo": "back.jpg"}
 
     (debug / "board_side_decision.json").write_text(
         json.dumps({"side": "front"}), encoding="utf-8"
     )
-    back_call = ToolInvocation(
-        id="back", name="register_back_board_from_outline_and_holes", arguments={}
+    front_plan = agent._build_workflow_plan({**common, "target_board_side": "front"})
+    registration_idx = next(
+        i for i, step in enumerate(front_plan)
+        if step.step_id == "partback_board_registration"
     )
-    assert "side=front" in agent._is_call_blocked_by_plan(back_call, mixed, partd_idx)
-    assert "side=front" in agent._is_call_blocked_by_plan(
-        back_call, mixed, len(mixed)
+    outline_call = ToolInvocation(
+        id="outline", name="register_back_board_from_outline_and_holes", arguments={}
+    )
+    assert agent._is_call_blocked_by_plan(
+        outline_call, front_plan, registration_idx
+    ) is None
+    front_ic_call = ToolInvocation(
+        id="front-ic", name="case12_build_and_align_from_step02_anchors", arguments={}
+    )
+    assert "IC-anchor tools" in agent._is_call_blocked_by_plan(
+        front_ic_call, front_plan, registration_idx
     )
 
     (debug / "board_side_decision.json").write_text(
         json.dumps({"side": "back"}), encoding="utf-8"
     )
-    front_call = ToolInvocation(
-        id="front", name="case12_build_and_align_from_step02_anchors", arguments={}
+    back_plan = agent._build_workflow_plan({**common, "target_board_side": "back"})
+    back_registration_idx = next(
+        i for i, step in enumerate(back_plan)
+        if step.step_id == "partback_board_registration"
     )
-    assert "side=back" in agent._is_call_blocked_by_plan(front_call, mixed, partd_idx)
-    assert "side=back" in agent._is_call_blocked_by_plan(
-        front_call, mixed, len(mixed)
+    back_ic_call = ToolInvocation(
+        id="back-ic", name="detect_largest_ic_on_board_full", arguments={}
     )
+    assert "IC-anchor tools" in agent._is_call_blocked_by_plan(
+        back_ic_call, back_plan, back_registration_idx
+    )
+
+
+def test_outline_tool_arguments_are_forced_to_selected_physical_photo(tmp_path):
+    from rich.console import Console
+
+    from agent.agent import Agent
+    from agent.config import Config
+
+    agent = Agent(
+        Config(
+            base_url="http://localhost:0",
+            api_key="sk",
+            model="mock",
+            workspace_dir=tmp_path,
+        ),
+        console=Console(force_terminal=False, width=120),
+    )
+    agent._run_inputs = {"target_board_side": "front"}
+
+    registration = agent._route_outline_tool_arguments(
+        "register_back_board_from_outline_and_holes",
+        {"back_board_path": "INPUT_PATHS.back_board_photo"},
+    )
+    finalization = agent._route_outline_tool_arguments(
+        "emit_step08_from_back_board_registration",
+        {},
+    )
+
+    assert registration["back_board_path"] == "INPUT_PATHS.front_board_photo"
+    assert finalization["back_board_path"] == "INPUT_PATHS.front_board_photo"
+    assert finalization["camera_view"] == "front"
+
+
+def test_outline_finalization_tags_front_camera_and_mapping(tmp_path, monkeypatch):
+    import agent.builtin_tools as builtin_tools
+    from agent.builtin_tools import (
+        _tool_emit_step08_from_back_board_registration,
+        set_runtime_context,
+    )
+    from agent.tools import ToolResult
+
+    set_runtime_context(project_root=tmp_path, workspace=tmp_path)
+
+    def fake_emit(**kwargs):
+        out = tmp_path / "debug" / "step08_result.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"pixel": [12, 34]}), encoding="utf-8")
+        return ToolResult(text=f"mapping={kwargs['mapping_method']}")
+
+    monkeypatch.setattr(
+        builtin_tools,
+        "_tool_emit_step08_from_case12_aligned",
+        fake_emit,
+    )
+    result = _tool_emit_step08_from_back_board_registration(
+        workspace=tmp_path,
+        back_board_path="INPUT_PATHS.front_board_photo",
+        camera_view="front",
+    )
+    payload = json.loads(
+        (tmp_path / "debug" / "step08_result.json").read_text(encoding="utf-8")
+    )
+
+    assert result.ok is True
+    assert payload["camera_view"] == "front"
+    assert payload["mapping_method"] == "front_board_outline_holes"
+
+
+def test_step08_emitter_preserves_front_outline_mapping_method(tmp_path):
+    from PIL import Image
+
+    from agent.builtin_tools import (
+        _tool_emit_step08_from_case12_aligned,
+        set_runtime_context,
+    )
+
+    debug = tmp_path / "debug"
+    debug.mkdir()
+    (debug / "aligned.json").write_text(
+        json.dumps({
+            "board_roi_target_px_approx": [40.25, 30.75],
+            "source": "back_board_outline_mechanical_landmarks_homography",
+        }),
+        encoding="utf-8",
+    )
+    Image.new("RGB", (100, 80), "white").save(debug / "board.png")
+    set_runtime_context(project_root=tmp_path, workspace=tmp_path)
+
+    result = _tool_emit_step08_from_case12_aligned(
+        workspace=tmp_path,
+        aligned_json_path="debug/aligned.json",
+        board_anchor_path="debug/board.png",
+        mapping_method="front_board_outline_holes",
+    )
+    mapping = json.loads(
+        (debug / "step03_mapping.json").read_text(encoding="utf-8")
+    )
+
+    assert result.ok is True
+    assert mapping["mapping_method"] == "front_board_outline_holes"
 
 
 def test_finish_rejects_camera_view_opposite_to_locked_side(tmp_path):

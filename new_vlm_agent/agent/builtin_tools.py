@@ -565,7 +565,9 @@ def _tool_search_pdf_text(workspace: Path,
                           case_sensitive: bool = False,
                           max_results: int = 20,
                           context_chars: int = 80,
-                          out_json_path: str = "") -> ToolResult:
+                          out_json_path: str = "",
+                          page_filter: list[int] | None = None,
+                          page_filter_reason: str = "") -> ToolResult:
     """Search text in a PDF and return hit pages, snippets, and bbox per hit (PDF points).
 
     Coordinates are PyMuPDF page space: origin top-left, x right, y down, unit = pt.
@@ -599,6 +601,22 @@ def _tool_search_pdf_text(workspace: Path,
         context_chars = max(10, int(context_chars))
     except (TypeError, ValueError):
         context_chars = 80
+    normalized_page_filter: list[int] = []
+    if page_filter is not None:
+        try:
+            normalized_page_filter = sorted({
+                int(page) for page in page_filter if int(page) >= 1
+            })
+        except (TypeError, ValueError):
+            return ToolResult(
+                text="[pdf-search-error] page_filter must contain positive 1-based page numbers.",
+                ok=False,
+            )
+        if not normalized_page_filter:
+            return ToolResult(
+                text="[pdf-search-error] page_filter was provided but contains no valid pages.",
+                ok=False,
+            )
 
     try:
         import fitz  # type: ignore
@@ -633,6 +651,8 @@ def _tool_search_pdf_text(workspace: Path,
                 break
             page = doc.load_page(i)
             page_no = i + 1
+            if normalized_page_filter and page_no not in normalized_page_filter:
+                continue
             seen_keys: set[tuple[float, float, float, float]] = set()
             page_rects: list[tuple[Any, str]] = []
 
@@ -701,6 +721,8 @@ def _tool_search_pdf_text(workspace: Path,
         "rect_to_raster_px": "rect_pdf * (dpi / 72) when using pdf_page_to_image(dpi)",
         "hit_count": len(hits),
         "hit_pages": hit_pages,
+        "page_filter": normalized_page_filter,
+        "page_filter_reason": str(page_filter_reason or "").strip(),
         "hits": hits,
     }
 
@@ -733,6 +755,9 @@ def _tool_search_pdf_text(workspace: Path,
     msg = (
         f"PDF text search hits for query {query!r}.\n"
         f"pdf={src}\n"
+        f"page_filter={normalized_page_filter or 'all'}"
+        + (f" reason={page_filter_reason}" if page_filter_reason else "")
+        + "\n"
         f"hit_pages={hit_pages}\n"
         f"hit_count={len(hits)}\n"
         f"top_hits:\n{top}"
@@ -1001,6 +1026,7 @@ def _tool_mark_tp_on_assembly_from_pdf_hit(
             f"pdf={pdf_p}\n"
             f"png={png_p}\n"
             f"rect_pdf={rect_pdf}\n"
+            f"selected_page={page_num}\n"
             f"scale=({sx:.6f}, {sy:.6f})\n"
             f"roi=[{wl},{wt},{wr},{wb}] size={wr-wl}x{wb-wt}\n"
             f"tp_center=({gx},{gy}) radius={gr}\n"
@@ -1740,6 +1766,7 @@ def _tool_emit_step08_from_case12_aligned(
     if isinstance(mapping_method, str) and mapping_method.strip() in {
         "case12_step02_opencv_ic_align",
         "case12_step02_vlm_ic_align",
+        "front_board_outline_holes",
         "back_board_outline_holes",
     }:
         final_method = mapping_method.strip()
@@ -1831,7 +1858,48 @@ def _tool_prepare_back_board_landmark_candidates(
         debug = _resolve_write(workspace, "debug/back_02_edge_hole_candidates.json").parent
         summary = prepare_landmark_review(locator, board, debug)
     except Exception as e:  # noqa: BLE001
-        return ToolResult(text=f"[back-landmark-candidates] failed: {e}", ok=False)
+        # Landmark matching is optional refinement.  Persist a valid empty
+        # review input so the workflow can record matches=[] and advance to
+        # outline-only registration instead of retrying this tool until the
+        # agent reaches max_steps.
+        debug = _resolve_write(workspace, "debug/back_02_edge_hole_candidates.json").parent
+        debug.mkdir(parents=True, exist_ok=True)
+        reason = f"{type(e).__name__}: {e}"
+        candidate_json = debug / "back_02_edge_hole_candidates.json"
+        candidate_sheet = debug / "back_02_vlm_edge_hole_candidate_sheet.png"
+        candidate_json.write_text(
+            json.dumps(
+                {
+                    "instruction": (
+                        "Candidate generation failed. Record matches=[] and continue with "
+                        "the safe outline-only registration fallback."
+                    ),
+                    "locator": {"accepted_by_cv": [], "rejected_by_cv": []},
+                    "photo": {"accepted_by_cv": [], "rejected_by_cv": []},
+                    "fallback_reason": reason,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        sheet = Image.new("RGB", (1280, 320), "white")
+        draw = ImageDraw.Draw(sheet)
+        draw.text((40, 45), "BACK-BOARD LANDMARK FALLBACK", fill=(180, 30, 30))
+        draw.text((40, 105), "No reliable CV candidates were produced.", fill=(20, 20, 20))
+        draw.text((40, 155), "Call record_back_landmark_review with matches=[] to continue.", fill=(20, 20, 20))
+        draw.text((40, 215), reason[:170], fill=(90, 90, 90))
+        sheet.save(candidate_sheet)
+        return ToolResult(
+            text=(
+                "Back-board landmark candidate generation could not produce reliable candidates, "
+                "so a safe empty fallback was created.\n"
+                "Call record_back_landmark_review with matches=[] and explain that CV candidate "
+                "generation failed; do not retry prepare_back_board_landmark_candidates.\n"
+                f"fallback_reason={reason}\ncombined_sheet={candidate_sheet}"
+            ),
+            images=[str(candidate_sheet)],
+        )
     return ToolResult(
         text=(
             "Back-board PCB-edge hole candidate sheets prepared for VLM semantic review.\n"
@@ -1922,10 +1990,12 @@ def _tool_register_back_board_from_outline_and_holes(
     locator_path: str = "debug/case10_assembly_drawing_tp_marked.png",
     back_board_path: str = "INPUT_PATHS.back_board_photo",
     review_path: str = "debug/back_03_vlm_edge_hole_review.json",
+    locator_roi_hint_norm: list[float] | None = None,
+    back_board_roi_hint_norm: list[float] | None = None,
     out_json_path: str = "debug/back_board_registration.json",
     out_overlay_path: str = "debug/back_board_registration_overlay.png",
 ) -> ToolResult:
-    """Map a green-marked back-side locator to a back board using outline holes."""
+    """Map a green-marked locator to the selected board photo using outline holes."""
     try:
         from .back_board_registration import draw_overlay, register
         locator = _resolve_read(locator_path)
@@ -1936,11 +2006,26 @@ def _tool_register_back_board_from_outline_and_holes(
             review = _resolve_read(review_path)
         except Exception:
             review = None
-        result = register(locator, board, debug_dir=out_json.parent, review_path=review)
+        result = register(
+            locator,
+            board,
+            debug_dir=out_json.parent,
+            review_path=review,
+            locator_roi_hint_norm=locator_roi_hint_norm,
+            board_roi_hint_norm=back_board_roi_hint_norm,
+        )
         out_json.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         draw_overlay(board, result, out_overlay)
     except Exception as e:  # noqa: BLE001
-        return ToolResult(text=f"[back-board-registration] failed: {e}", ok=False)
+        used_semantic_hint = bool(locator_roi_hint_norm or back_board_roi_hint_norm)
+        next_action = (
+            "Semantic ROI refinement also failed. Do not retry registration; call finish with "
+            "needs_user_help=true and report the outline quality failure."
+            if used_semantic_hint else
+            "View the marked locator and back-board photo, then retry exactly once with rough "
+            "normalized [x1,y1,x2,y2] PCB ROIs. OpenCV will refine the edges inside those ROIs."
+        )
+        return ToolResult(text=f"[back-board-registration] failed: {e}\n{next_action}", ok=False)
     target = result["board_roi_target_px_approx"]
     return ToolResult(
         text=(
@@ -1951,7 +2036,12 @@ def _tool_register_back_board_from_outline_and_holes(
             f"confidence={result['confidence']}\n"
             f"saved:\n- {out_json}\n- {out_overlay}"
         ),
-        images=[str(out_overlay)],
+        # The full-resolution overlay is retained for audit and UI display,
+        # but attaching it to the next model turn can push the accumulated
+        # multimodal request over the provider body-size limit.  The next step
+        # is deterministic and reads the JSON directly, so no VLM attachment
+        # is needed here.
+        images=[],
     )
 
 
@@ -2005,8 +2095,19 @@ def _tool_emit_step08_from_back_board_registration(
     workspace: Path,
     registration_json_path: str = "debug/back_board_registration.json",
     back_board_path: str = "INPUT_PATHS.back_board_photo",
+    camera_view: str | None = None,
 ) -> ToolResult:
-    """Produce the standard final artifacts for the back-side registration path."""
+    """Produce final artifacts for outline/hole registration on either board side."""
+    normalized_side = str(camera_view or "").strip().lower()
+    aliases = {"top": "front", "bottom": "back", "bot": "back"}
+    normalized_side = aliases.get(normalized_side, normalized_side)
+    if normalized_side not in {"front", "back"}:
+        normalized_side = (
+            "front"
+            if "front_board_photo" in str(back_board_path).lower()
+            else "back"
+        )
+    mapping_method = f"{normalized_side}_board_outline_holes"
     result = _tool_emit_step08_from_case12_aligned(
         workspace=workspace,
         aligned_json_path=registration_json_path,
@@ -2014,14 +2115,14 @@ def _tool_emit_step08_from_back_board_registration(
         out_step08_png_path="debug/step08_final_tp.png",
         out_step08_json_path="debug/step08_result.json",
         out_mapping_json_path="debug/step03_mapping.json",
-        mapping_method="back_board_outline_holes",
+        mapping_method=mapping_method,
     )
     if result.ok:
         try:
             out = _resolve_write(workspace, "debug/step08_result.json")
             payload = json.loads(out.read_text(encoding="utf-8"))
-            payload["camera_view"] = "back"
-            payload["mapping_method"] = "back_board_outline_holes"
+            payload["camera_view"] = normalized_side
+            payload["mapping_method"] = mapping_method
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         except Exception as e:  # noqa: BLE001
             return ToolResult(text=f"[back-board-step08] failed to tag final result: {e}", ok=False)
@@ -3899,11 +4000,24 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
                     "type": "string",
                     "description": "Optional output JSON under workspace, e.g. debug/step01_pdf_search.json",
                 },
+                "page_filter": {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "description": (
+                        "Optional strict 1-based page allowlist. Assembly TP searches should use "
+                        "the locator page matching target_board_side."
+                    ),
+                },
+                "page_filter_reason": {
+                    "type": "string",
+                    "description": "Audit reason for applying page_filter.",
+                },
             },
             "required": ["pdf_path", "query"],
         },
         fn=lambda pdf_path, query, case_sensitive=False, max_results=20,
-            context_chars=80, out_json_path="": _tool_search_pdf_text(
+            context_chars=80, out_json_path="", page_filter=None,
+            page_filter_reason="": _tool_search_pdf_text(
                 workspace=workspace,
                 pdf_path=pdf_path,
                 query=query,
@@ -3911,6 +4025,8 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
                 max_results=max_results,
                 context_chars=context_chars,
                 out_json_path=out_json_path,
+                page_filter=page_filter,
+                page_filter_reason=page_filter_reason,
             ),
     ))
 
@@ -4187,9 +4303,11 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
     reg.register(Tool(
         name="register_back_board_from_outline_and_holes",
         description=(
-            "Back-side-only registration: start from the PCB rectangle homography, optionally refine it with "
+            "IC-free registration for either physical side: start from the PCB rectangle homography, optionally refine it with "
             "VLM-reviewed PCB-edge holes when strict error gates improve, otherwise automatically retain the "
-            "original rectangle mapping. Use this instead of largest-IC detection for side=back."
+            "original rectangle mapping. Automatic CV excludes page frames and border-colored photo backgrounds. "
+            "If automatic detection fails, view both images and retry only once with rough normalized PCB ROIs; "
+            "OpenCV, not the VLM coordinates, remains the final geometry."
         ),
         parameters={
             "type": "object",
@@ -4197,35 +4315,55 @@ def build_default_registry(workspace: Path) -> ToolRegistry:
                 "locator_path": {"type": "string", "default": "debug/case10_assembly_drawing_tp_marked.png"},
                 "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
                 "review_path": {"type": "string", "default": "debug/back_03_vlm_edge_hole_review.json"},
+                "locator_roi_hint_norm": {
+                    "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1},
+                    "minItems": 4, "maxItems": 4,
+                    "description": "Optional one-time VLM rough PCB ROI [x1,y1,x2,y2], normalized to locator image.",
+                },
+                "back_board_roi_hint_norm": {
+                    "type": "array", "items": {"type": "number", "minimum": 0, "maximum": 1},
+                    "minItems": 4, "maxItems": 4,
+                    "description": "Optional one-time VLM rough PCB ROI [x1,y1,x2,y2], normalized to photo.",
+                },
             },
         },
-        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png", back_board_path="INPUT_PATHS.back_board_photo", review_path="debug/back_03_vlm_edge_hole_review.json":
+        fn=lambda locator_path="debug/case10_assembly_drawing_tp_marked.png",
+            back_board_path="INPUT_PATHS.back_board_photo",
+            review_path="debug/back_03_vlm_edge_hole_review.json",
+            locator_roi_hint_norm=None,
+            back_board_roi_hint_norm=None:
             _tool_register_back_board_from_outline_and_holes(
                 workspace=workspace,
                 locator_path=locator_path,
                 back_board_path=back_board_path,
                 review_path=review_path,
+                locator_roi_hint_norm=locator_roi_hint_norm,
+                back_board_roi_hint_norm=back_board_roi_hint_norm,
             ),
     ))
 
     reg.register(Tool(
         name="emit_step08_from_back_board_registration",
         description=(
-            "Back-side deterministic finalization. Read back_board_registration.json, draw the "
-            "final TP marker on the back photo, and write the standard step08 and mapping JSON artifacts."
+            "Deterministic outline/hole finalization for either side. Read back_board_registration.json, draw the "
+            "final TP marker on the selected physical photo, and write standard step08 and mapping JSON artifacts."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "registration_json_path": {"type": "string", "default": "debug/back_board_registration.json"},
                 "back_board_path": {"type": "string", "default": "INPUT_PATHS.back_board_photo"},
+                "camera_view": {"type": "string", "enum": ["front", "back"]},
             },
         },
-        fn=lambda registration_json_path="debug/back_board_registration.json", back_board_path="INPUT_PATHS.back_board_photo":
+        fn=lambda registration_json_path="debug/back_board_registration.json",
+            back_board_path="INPUT_PATHS.back_board_photo",
+            camera_view=None:
             _tool_emit_step08_from_back_board_registration(
                 workspace=workspace,
                 registration_json_path=registration_json_path,
                 back_board_path=back_board_path,
+                camera_view=camera_view,
             ),
     ))
 

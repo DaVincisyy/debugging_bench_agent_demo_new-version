@@ -16,16 +16,23 @@ yarn-error.log*
 # Runtime outputs
 output/
 Inputdemo/output/
+Inputdemo/outputs/
 MG400stimulation/MG400simulation-git-latest-ghproxy/
 **/workspace/runs/
 **/workspace/debug/
 **/workspace/workspace/
 **/workspace/vlm-agent-runs/
+new_vlm_agent/workspace/
 Vlm agent/Debugging-agent-v2/workspace/
 Vlm agent/Debugging-agent-v2/data/cases/case-*/
+data/cases/case-*/
+data/robot_pose_log.md
 **/__pycache__/
 **/.pytest_cache/
 **/.pytest_tmp/
+.pytest_tmp_case*/
+pytest_tmp_*/
+tmp/
 *.py[cod]
 
 # Local editor and OS files

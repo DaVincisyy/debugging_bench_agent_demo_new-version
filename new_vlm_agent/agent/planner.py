@@ -37,7 +37,14 @@ PLANNER_MAX_PIXELS = int(os.environ.get("PLANNER_MAX_PIXELS", str(2_000_000)))
 
 # JPEG quality for the compressed schematic pages sent to the planner.
 PLANNER_JPEG_QUALITY = int(os.environ.get("PLANNER_JPEG_QUALITY", "85"))
-PLANNER_MODEL = os.environ.get("PLANNER_MODEL") or os.environ.get("VLM_MODEL", "qwen3.6-plus")
+def _resolve_planner_model(cfg: Config) -> str:
+    """Resolve the planner model after ``load_config`` has loaded the run env.
+
+    Do not cache this at module import time: the service imports ``planner``
+    before a request-specific ``.env`` is loaded, which previously locked the
+    planner to the stale hard-coded qwen3.6-plus fallback.
+    """
+    return str(os.environ.get("PLANNER_MODEL") or cfg.model).strip()
 
 
 PLANNER_SYSTEM_PROMPT = """\
@@ -203,7 +210,7 @@ def run_planner(
 
     # Planner is one-shot — raster images + no thinking.
     planner_cfg = deepcopy(cfg)
-    planner_cfg.model = PLANNER_MODEL
+    planner_cfg.model = _resolve_planner_model(cfg)
     planner_cfg.http_timeout_sec = 600
     planner_cfg.http_max_retries = 0
     planner_cfg.connect_retries = 0

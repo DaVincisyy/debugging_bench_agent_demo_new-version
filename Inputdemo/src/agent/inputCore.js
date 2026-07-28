@@ -50,6 +50,8 @@ export function parseUserCommand(payload) {
 
 function normalizeBoardSide(value) {
   const side = String(value || "auto").trim().toLowerCase();
+  if (side === "top") return "front";
+  if (side === "bottom") return "back";
   return ["auto", "front", "back"].includes(side) ? side : "auto";
 }
 

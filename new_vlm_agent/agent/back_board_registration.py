@@ -40,72 +40,432 @@ def _json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _board_contour(image, *, domain: str):
+def _bbox_contains(outer: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
+    ox, oy, ow, oh = outer
+    ix, iy, iw, ih = inner
+    tolerance = max(2, int(round(min(ow, oh) * 0.005)))
+    return bool(
+        ix >= ox - tolerance
+        and iy >= oy - tolerance
+        and ix + iw <= ox + ow + tolerance
+        and iy + ih <= oy + oh + tolerance
+    )
+
+
+def _auxiliary_frame_inner_candidate(
+    outer: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    target_point: tuple[float, float] | None = None,
+) -> dict[str, Any] | None:
+    """Prefer a nested PCB body over an outer panel/auxiliary frame.
+
+    Assembly drawings can contain narrow tooling rails above and below the
+    physical PCB.  Both the rail envelope and PCB body are valid rectangles,
+    so selecting the largest contour silently includes the rails.  A nested
+    candidate is considered the PCB body only when it occupies most of the
+    outer area, has a balanced inset on at least one axis (the characteristic
+    pair of auxiliary rails), and still contains the marked TP.
+    """
+    ox, oy, ow, oh = outer["bbox"]
+    outer_area = max(float(outer["area_ratio"]), 1e-9)
+    matches: list[dict[str, Any]] = []
+    for item in candidates:
+        if item is outer or not _bbox_contains(outer["bbox"], item["bbox"]):
+            continue
+        ix, iy, iw, ih = item["bbox"]
+        area_fraction = float(item["area_ratio"]) / outer_area
+        if not 0.58 <= area_fraction <= 0.93:
+            continue
+        aspect_ratio = max(iw, ih) / max(1.0, min(iw, ih))
+        if aspect_ratio > 4.0:
+            continue
+        if target_point is not None:
+            tx, ty = target_point
+            target_margin = max(2, int(round(min(iw, ih) * 0.01)))
+            if not (
+                ix - target_margin <= tx <= ix + iw + target_margin
+                and iy - target_margin <= ty <= iy + ih + target_margin
+            ):
+                continue
+
+        left, right = ix - ox, (ox + ow) - (ix + iw)
+        top, bottom = iy - oy, (oy + oh) - (iy + ih)
+
+        def balanced_pair(first: int, second: int, span: int) -> bool:
+            minimum = min(first, second)
+            maximum = max(first, second)
+            return bool(
+                minimum >= span * 0.025
+                and maximum <= span * 0.30
+                and maximum / max(1.0, minimum) <= 2.5
+            )
+
+        if not (balanced_pair(left, right, ow) or balanced_pair(top, bottom, oh)):
+            continue
+        item["auxiliary_frame_area_fraction"] = area_fraction
+        item["auxiliary_frame_insets"] = {
+            "left": int(left), "right": int(right),
+            "top": int(top), "bottom": int(bottom),
+        }
+        matches.append(item)
+    if not matches:
+        return None
+    return max(matches, key=lambda item: (item["rectangularity"], item["area_ratio"]))
+
+
+def _contour_aspect_ratio(contour) -> float:
+    cv2, _ = _cv()
+    (_, _), (width, height), _ = cv2.minAreaRect(contour)
+    short = max(1.0, min(float(width), float(height)))
+    return max(float(width), float(height)) / short
+
+
+def _refine_photo_rect_to_expected_aspect(
+    contour,
+    support_mask,
+    expected_aspect_ratio: float | None,
+):
+    """Trim connector/screw protrusions using locator aspect and edge support."""
     cv2, np = _cv()
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    evidence: dict[str, Any] = {
+        "attempted": False,
+        "applied": False,
+        "expected_aspect_ratio": expected_aspect_ratio,
+        "reason": "expected_aspect_ratio_not_provided",
+    }
+    if expected_aspect_ratio is None:
+        return contour, evidence
+    try:
+        expected = float(expected_aspect_ratio)
+    except (TypeError, ValueError):
+        return contour, evidence
+    if not math.isfinite(expected) or not 1.02 <= expected <= 5.0:
+        evidence["reason"] = "expected_aspect_ratio_invalid"
+        return contour, evidence
+
+    points = _ordered_box(contour).astype(np.float32)
+    top_left, top_right, bottom_right, bottom_left = points
+    width = float(np.linalg.norm(top_right - top_left))
+    height = float(np.linalg.norm(bottom_left - top_left))
+    short = max(1.0, min(width, height))
+    current = max(width, height) / short
+    evidence.update({
+        "attempted": True,
+        "current_aspect_ratio": round(current, 6),
+        "expected_aspect_ratio": round(expected, 6),
+    })
+    if abs(current - expected) / expected <= 0.025:
+        evidence["reason"] = "aspect_ratio_already_consistent"
+        return contour, evidence
+
+    canvas_width = max(8, int(round(width)))
+    canvas_height = max(8, int(round(height)))
+    destination = np.float32([
+        [0, 0],
+        [canvas_width - 1, 0],
+        [canvas_width - 1, canvas_height - 1],
+        [0, canvas_height - 1],
+    ])
+    matrix = cv2.getPerspectiveTransform(points, destination)
+    warped = cv2.warpPerspective(
+        support_mask,
+        matrix,
+        (canvas_width, canvas_height),
+        flags=cv2.INTER_NEAREST,
+    )
+    band = max(5, int(round(min(canvas_width, canvas_height) * 0.04)))
+    foreground = warped > 0
+    supports = {
+        "left": float(foreground[:, :band].mean()),
+        "right": float(foreground[:, -band:].mean()),
+        "top": float(foreground[:band, :].mean()),
+        "bottom": float(foreground[-band:, :].mean()),
+    }
+    evidence["edge_support"] = {key: round(value, 6) for key, value in supports.items()}
+
+    trim_axis: str
+    trim_total: float
+    if current > expected:
+        trim_axis = "width" if width >= height else "height"
+        long_side = max(width, height)
+        short_side = min(width, height)
+        trim_total = long_side - short_side * expected
+    else:
+        trim_axis = "width" if width <= height else "height"
+        long_side = max(width, height)
+        short_side = min(width, height)
+        trim_total = short_side - long_side / expected
+    axis_size = width if trim_axis == "width" else height
+    trim_fraction = trim_total / max(1.0, axis_size)
+    evidence.update({
+        "trim_axis": trim_axis,
+        "trim_total_px": round(trim_total, 3),
+        "trim_fraction": round(trim_fraction, 6),
+    })
+    if trim_total <= 1.0:
+        evidence["reason"] = "aspect_adjustment_would_not_shrink"
+        return contour, evidence
+    if trim_fraction > 0.25:
+        evidence["reason"] = "required_trim_exceeds_safety_limit"
+        return contour, evidence
+
+    first_name, second_name = (
+        ("left", "right") if trim_axis == "width" else ("top", "bottom")
+    )
+    first_support = supports[first_name]
+    second_support = supports[second_name]
+    if first_support >= second_support * 1.15 and first_support - second_support >= 0.05:
+        first_trim, second_trim = 0.0, trim_total
+        trim_side = second_name
+    elif second_support >= first_support * 1.15 and second_support - first_support >= 0.05:
+        first_trim, second_trim = trim_total, 0.0
+        trim_side = first_name
+    else:
+        first_trim = second_trim = trim_total / 2.0
+        trim_side = "symmetric"
+
+    refined = points.copy()
+    if trim_axis == "width":
+        unit = (top_right - top_left) / max(width, 1.0)
+        refined[0] += unit * first_trim
+        refined[3] += unit * first_trim
+        refined[1] -= unit * second_trim
+        refined[2] -= unit * second_trim
+    else:
+        unit = (bottom_left - top_left) / max(height, 1.0)
+        refined[0] += unit * first_trim
+        refined[1] += unit * first_trim
+        refined[2] -= unit * second_trim
+        refined[3] -= unit * second_trim
+
+    # Keep the same integer contour representation returned by findContours;
+    # downstream landmark masks use drawContours/fillPoly, which require CV_32S.
+    refined_contour = np.rint(refined).reshape((-1, 1, 2)).astype(np.int32)
+    evidence.update({
+        "applied": True,
+        "reason": "trimmed_low_support_protruding_edge",
+        "trim_side": trim_side,
+        "refined_aspect_ratio": round(_contour_aspect_ratio(refined_contour), 6),
+        "original_corners": [[round(float(x), 3), round(float(y), 3)] for x, y in points],
+        "refined_corners": [[round(float(x), 3), round(float(y), 3)] for x, y in refined],
+    })
+    return refined_contour, evidence
+
+
+def _board_contour(
+    image,
+    *,
+    domain: str,
+    roi_hint_norm: list[float] | None = None,
+    expected_aspect_ratio: float | None = None,
+):
+    cv2, np = _cv()
     h, w = image.shape[:2]
+    roi_x1, roi_y1, roi_x2, roi_y2 = 0, 0, w, h
+    if isinstance(roi_hint_norm, list) and len(roi_hint_norm) == 4:
+        try:
+            nx1, ny1, nx2, ny2 = [float(v) for v in roi_hint_norm]
+            if not all(math.isfinite(v) for v in (nx1, ny1, nx2, ny2)):
+                raise ValueError
+            nx1, nx2 = sorted((max(0.0, min(1.0, nx1)), max(0.0, min(1.0, nx2))))
+            ny1, ny2 = sorted((max(0.0, min(1.0, ny1)), max(0.0, min(1.0, ny2))))
+            if nx2 - nx1 < 0.08 or ny2 - ny1 < 0.08:
+                raise ValueError
+            # Expand the semantic proposal slightly so OpenCV can recover the
+            # physical edges instead of treating the VLM box as exact geometry.
+            pad_x = (nx2 - nx1) * 0.08
+            pad_y = (ny2 - ny1) * 0.08
+            roi_x1 = int(round(max(0.0, nx1 - pad_x) * w))
+            roi_y1 = int(round(max(0.0, ny1 - pad_y) * h))
+            roi_x2 = int(round(min(1.0, nx2 + pad_x) * w))
+            roi_y2 = int(round(min(1.0, ny2 + pad_y) * h))
+        except (TypeError, ValueError):
+            raise ValueError("roi_hint_norm must be four normalized numbers [x1,y1,x2,y2]")
+    work = image[roi_y1:roi_y2, roi_x1:roi_x2]
+    hsv = cv2.cvtColor(work, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
+    rh, rw = work.shape[:2]
     if domain == "photo":
-        # Hue is unstable in dark pixels: a neutral fixture shadow can receive
-        # a nominally green HSV hue. Require actual green-channel dominance so
-        # shadows are excluded from the physical PCB silhouette.
-        blue, green, red = cv2.split(image)
+        # Estimate the surrounding surface from the image border.  When that
+        # surface is chromatic (for example case-204's green ESD mat), retain
+        # only saturated pixels whose hue differs from it.  On a neutral
+        # background (case-203), ordinary chromatic segmentation is sufficient.
+        border_width = max(3, int(round(min(rh, rw) * 0.04)))
+        border = np.concatenate([
+            hsv[:border_width].reshape(-1, 3),
+            hsv[-border_width:].reshape(-1, 3),
+            hsv[:, :border_width].reshape(-1, 3),
+            hsv[:, -border_width:].reshape(-1, 3),
+        ])
+        saturated_border = border[border[:, 1] >= 40]
+        hue_samples = saturated_border[:, 0] if saturated_border.size else border[:, 0]
+        background_hue = int(np.bincount(hue_samples, minlength=180).argmax())
+        background_saturation = float(np.median(border[:, 1]))
+        saturation = hsv[:, :, 1]
+        value = hsv[:, :, 2]
+        if background_saturation >= 40:
+            hue_distance = np.abs(hsv[:, :, 0].astype(np.int16) - background_hue)
+            hue_distance = np.minimum(hue_distance, 180 - hue_distance)
+            chromatic = (saturation >= 55) & (value >= 25) & (hue_distance >= 20)
+            photo_method = "border_hue_contrast"
+        else:
+            chromatic = (saturation >= 75) & (value >= 25)
+            photo_method = "chromatic_solder_mask"
+
+        blue, green, red = cv2.split(work)
         b16 = blue.astype(np.int16)
         g16 = green.astype(np.int16)
         r16 = red.astype(np.int16)
-        mask = (
+        green_dominant = (
             (g16 >= 45)
             & (g16 >= r16 + 10)
             & (g16 >= b16 + 10)
-        ).astype(np.uint8) * 255
-        scale = max(9, int(round(min(h, w) * 0.012)))
+        )
+        # The green fallback is safe only when the surrounding surface is
+        # neutral; otherwise it would reconnect a green mat to the whole image.
+        if background_saturation < 40:
+            chromatic |= green_dominant
+        mask = chromatic.astype(np.uint8) * 255
+        scale = max(9, int(round(min(rh, rw) * 0.012)))
+        retrieval_mode = cv2.RETR_EXTERNAL
     else:
         # Locator PDFs are faint gray line art, occasionally with a green TP
-        # marker.  Preserve both dark strokes and saturated annotations.
+        # marker. Use a small closing kernel and RETR_LIST so an internal PCB
+        # rectangle remains a candidate instead of being swallowed by the
+        # PDF page border/title block.
         saturated = cv2.inRange(hsv, np.array([0, 22, 15]), np.array([180, 255, 247]))
         dark = cv2.threshold(gray, 247, 255, cv2.THRESH_BINARY_INV)[1]
         mask = cv2.bitwise_or(saturated, dark)
-        scale = max(5, int(round(min(h, w) * 0.018)))
+        scale = max(3, int(round(min(rh, rw) * 0.002)))
+        retrieval_mode = cv2.RETR_LIST
     if scale % 2 == 0:
         scale += 1
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (scale, scale))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    mask = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_CLOSE,
+        kernel,
+        iterations=2 if domain == "photo" else 1,
+    )
+    contours, _ = cv2.findContours(mask, retrieval_mode, cv2.CHAIN_APPROX_SIMPLE)
     min_area = h * w * 0.05
     contours = [c for c in contours if cv2.contourArea(c) >= min_area]
     if not contours:
         raise ValueError("PCB outline not found")
-    contour = max(contours, key=cv2.contourArea)
+
+    candidates: list[dict[str, Any]] = []
+    margin = max(3, int(round(min(h, w) * 0.004)))
+    min_rectangularity = 0.78 if domain == "photo" else 0.55
+    for raw_contour in contours:
+        contour = cv2.convexHull(raw_contour) if domain == "photo" else raw_contour
+        contour = contour + np.array([[[roi_x1, roi_y1]]], dtype=contour.dtype)
+        rect = cv2.minAreaRect(contour)
+        rect_area = max(1.0, float(rect[1][0] * rect[1][1]))
+        rectangularity = float(cv2.contourArea(contour) / rect_area)
+        x, y, bw, bh = cv2.boundingRect(contour)
+        area_ratio = float(cv2.contourArea(contour) / max(1, h * w))
+        bbox_area_ratio = float(bw * bh / max(1, h * w))
+        border_touch_count = sum((
+            x <= margin,
+            y <= margin,
+            x + bw >= w - margin,
+            y + bh >= h - margin,
+        ))
+        valid = bool(
+            0.08 <= area_ratio <= 0.94
+            and border_touch_count == 0
+            and rectangularity >= min_rectangularity
+            and (domain != "locator" or bbox_area_ratio <= 0.80)
+        )
+        candidates.append({
+            "contour": contour,
+            "rect": rect,
+            "rectangularity": rectangularity,
+            "bbox": (x, y, bw, bh),
+            "aspect_ratio": max(bw, bh) / max(1.0, min(bw, bh)),
+            "area_ratio": area_ratio,
+            "bbox_area_ratio": bbox_area_ratio,
+            "border_touch_count": border_touch_count,
+            "valid": valid,
+        })
+    valid_candidates = [item for item in candidates if item["valid"]]
+    selection_pool = valid_candidates or candidates
+    selected = max(selection_pool, key=lambda item: item["area_ratio"])
+    selection_method = "largest_valid_area"
+    auxiliary_frame_outer = None
+    if domain == "locator":
+        plausible = [item for item in selection_pool if item["aspect_ratio"] <= 4.0]
+        if plausible:
+            selected = max(plausible, key=lambda item: item["area_ratio"])
+        try:
+            target_point = _green_tp(image)
+        except ValueError:
+            target_point = None
+        nested = _auxiliary_frame_inner_candidate(selected, plausible, target_point)
+        if nested is not None:
+            auxiliary_frame_outer = selected
+            selected = nested
+            selection_method = "nested_inner_rectangle_over_auxiliary_frame"
+    contour = selected["contour"]
+    photo_body_refinement = None
     if domain == "photo":
-        contour = cv2.convexHull(contour)
-    rect = cv2.minAreaRect(contour)
+        full_support_mask = np.zeros((h, w), dtype=np.uint8)
+        full_support_mask[roi_y1:roi_y2, roi_x1:roi_x2] = mask
+        contour, photo_body_refinement = _refine_photo_rect_to_expected_aspect(
+            contour,
+            full_support_mask,
+            expected_aspect_ratio,
+        )
+    rect = selected["rect"]
+    if domain == "photo" and photo_body_refinement and photo_body_refinement["applied"]:
+        rect = cv2.minAreaRect(contour)
     box = cv2.boxPoints(rect).astype(np.int32)
-    rect_area = max(1.0, float(rect[1][0] * rect[1][1]))
-    rectangularity = float(cv2.contourArea(contour) / rect_area)
+    rectangularity = float(selected["rectangularity"])
     # Registration is defined by the physical PCB rectangle, not by shadow or
     # component protrusions in the raw foreground contour.
-    filled = np.zeros(mask.shape, dtype=np.uint8)
+    filled = np.zeros((h, w), dtype=np.uint8)
     cv2.fillConvexPoly(filled, box, 255)
     x, y, bw, bh = cv2.boundingRect(contour)
-    area_ratio = float(cv2.contourArea(contour) / max(1, h * w))
-    margin = max(3, int(round(min(h, w) * 0.004)))
-    touches = bool(x <= margin and y <= margin and x + bw >= w - margin and y + bh >= h - margin)
-    min_rectangularity = 0.78 if domain == "photo" else 0.55
-    valid = bool(
-        0.08 <= area_ratio <= 0.94
-        and not touches
-        and rectangularity >= min_rectangularity
-    )
+    area_ratio = float(selected["area_ratio"])
+    valid = bool(selected["valid"])
     metrics = {
         "domain": domain,
         "image_size": [int(w), int(h)],
         "bbox_xywh": [int(x), int(y), int(bw), int(bh)],
         "area_ratio": round(area_ratio, 6),
+        "bbox_area_ratio": round(float(selected["bbox_area_ratio"]), 6),
         "rectangularity": round(rectangularity, 6),
         "minimum_rectangularity": min_rectangularity,
-        "touches_all_image_borders": touches,
+        "border_touch_count": int(selected["border_touch_count"]),
+        "candidate_count": len(candidates),
+        "valid_candidate_count": len(valid_candidates),
+        "selection_method": selection_method,
+        "candidate_summaries": [
+            {
+                "bbox_xywh": [int(value) for value in item["bbox"]],
+                "area_ratio": round(float(item["area_ratio"]), 6),
+                "rectangularity": round(float(item["rectangularity"]), 6),
+                "aspect_ratio": round(float(item["aspect_ratio"]), 6),
+                "valid": bool(item["valid"]),
+                "selected": item is selected,
+            }
+            for item in sorted(candidates, key=lambda candidate: candidate["area_ratio"], reverse=True)
+        ],
+        "auxiliary_frame_outer_bbox_xywh": (
+            [int(value) for value in auxiliary_frame_outer["bbox"]]
+            if auxiliary_frame_outer is not None else None
+        ),
+        "photo_body_refinement": photo_body_refinement,
+        "target_marker_inside_selection": (
+            bool(
+                x <= target_point[0] <= x + bw
+                and y <= target_point[1] <= y + bh
+            )
+            if domain == "locator" and target_point is not None else None
+        ),
+        "semantic_roi_hint_norm": roi_hint_norm,
         "valid": valid,
-        "method": "green_channel_dominance_shadow_rejection" if domain == "photo" else "faint_line_art",
+        "method": photo_method if domain == "photo" else "internal_faint_line_rectangle",
     }
     return contour, filled, metrics
 
@@ -671,7 +1031,11 @@ def prepare_landmark_review(locator_path: str | Path, board_path: str | Path, de
     locator = _load(locator_path)
     board = _load(board_path)
     locator_contour, _, locator_outline = _board_contour(locator, domain="locator")
-    board_contour, _, board_outline = _board_contour(board, domain="photo")
+    board_contour, _, board_outline = _board_contour(
+        board,
+        domain="photo",
+        expected_aspect_ratio=_contour_aspect_ratio(locator_contour),
+    )
     locator_corners = _ordered_box(locator_contour)
     board_corners = _ordered_box(board_contour)
     loc_ok, loc_rejected = _candidate_landmarks(locator, locator_contour, domain="locator")
@@ -717,12 +1081,21 @@ def register(
     board_path: str | Path,
     debug_dir: str | Path | None = None,
     review_path: str | Path | None = None,
+    locator_roi_hint_norm: list[float] | None = None,
+    board_roi_hint_norm: list[float] | None = None,
 ) -> dict[str, Any]:
     cv2, np = _cv()
     locator = _load(locator_path)
     board = _load(board_path)
-    locator_contour, locator_mask, locator_outline = _board_contour(locator, domain="locator")
-    board_contour, board_mask, board_outline = _board_contour(board, domain="photo")
+    locator_contour, locator_mask, locator_outline = _board_contour(
+        locator, domain="locator", roi_hint_norm=locator_roi_hint_norm
+    )
+    board_contour, board_mask, board_outline = _board_contour(
+        board,
+        domain="photo",
+        roi_hint_norm=board_roi_hint_norm,
+        expected_aspect_ratio=_contour_aspect_ratio(locator_contour),
+    )
     if not locator_outline["valid"] or not board_outline["valid"]:
         raise ValueError("PCB outline quality gate failed before registration")
     locator_corners = _ordered_box(locator_contour)

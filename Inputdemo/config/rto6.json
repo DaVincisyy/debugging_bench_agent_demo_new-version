@@ -1,0 +1,9 @@
+{
+  "host": "192.168.2.3",
+  "port": 5025,
+  "measurementSlot": 1,
+  "captureMode": "set_mean_then_capture",
+  "desiredMeasurement": "MEAN",
+  "timeoutMs": 10000,
+  "outputDir": "outputs/rto6_measurements"
+}

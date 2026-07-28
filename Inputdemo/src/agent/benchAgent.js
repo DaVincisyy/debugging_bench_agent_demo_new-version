@@ -1,6 +1,11 @@
 import { AgentState, StepKind } from "../domain/states.js";
 import { createBenchRun, transition } from "../domain/run.js";
 import { mapVlmTargetToExecution } from "./vlmTargetExecutionMapper.js";
+import {
+  executeVlmCompletionReadyMove,
+  postReadyTargetExecutionEnabled,
+  vlmCompletionReadyMoveSucceeded
+} from "./vlmCompletionReadyMove.js";
 
 export class BenchAgent {
   constructor({ vlmClient, largeModelClient, ragRepository, armController, equipmentController, reportGenerator, vlmAgentCaseAdapter = null }) {
@@ -38,6 +43,48 @@ export class BenchAgent {
     run.plan = mapVlmTargetToExecution({ input, ragEvidence, vlmObservation, modelOutput });
 
     transition(run, AgentState.EXECUTING, "VLM target execution mapping created; executing hardware flow.");
+    const readyMove = await executeVlmCompletionReadyMove(this.armController);
+    run.execution.arm.push(readyMove.result);
+    if (!vlmCompletionReadyMoveSucceeded(readyMove.result)) {
+      transition(
+        run,
+        AgentState.REPORTING,
+        "VLM completed, but the required ready-position move failed; later hardware steps were stopped."
+      );
+      run.report = this.reportGenerator.create({
+        run,
+        ragEvidence,
+        vlmObservation,
+        measurements: run.execution.equipment
+      });
+      return run;
+    }
+
+    if (!postReadyTargetExecutionEnabled()) {
+      const targetPoints = (vlmObservation.recommendedMeasurements || [])
+        .map((item) => item.locationId)
+        .filter(Boolean);
+      const measurement = await this.equipmentController.captureCurrentDisplayReport({
+        runId: run.runId,
+        caseId: run.input.caseId,
+        targetPoints,
+        robotPose: readyMove.result.executedPose || readyMove.step.targetPose
+      });
+      run.execution.equipment.push(measurement);
+      transition(
+        run,
+        AgentState.REPORTING,
+        "VLM completed; MG400 is holding at the fixed measurement position, and the current RTO6 display was saved to Excel."
+      );
+      run.report = this.reportGenerator.create({
+        run,
+        ragEvidence,
+        vlmObservation,
+        measurements: run.execution.equipment
+      });
+      return run;
+    }
+
     const blockedLocations = new Map();
     for (const step of run.plan.steps) {
       if (step.kind === StepKind.ARM_MOTION || step.kind === StepKind.VISUAL_CAPTURE) {

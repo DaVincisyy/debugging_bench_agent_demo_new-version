@@ -1,6 +1,6 @@
 {
-  "mode": "simulation",
-  "ip": "127.0.0.1",
+  "mode": "mg400",
+  "ip": "192.168.1.6",
   "dashboardPort": 29999,
   "motionPort": 30003,
   "feedbackPort": 30004,

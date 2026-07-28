@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -26,6 +27,21 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
+
+
+def _configure_utf8_stdio() -> None:
+    """Prevent Windows GBK consoles/log redirects from crashing on PDF text."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
+
+
+_configure_utf8_stdio()
 
 from .agent import Agent
 from .case_builder import write_inputdemo_task_yaml

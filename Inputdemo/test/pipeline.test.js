@@ -20,7 +20,13 @@ import { RealVlmAgentModelClient } from "../src/adapters/realVlmAgentClient.js";
 import { VlmAgentServiceRunner } from "../src/adapters/vlmAgentServiceRunner.js";
 import { RobotGatewayClient } from "../src/adapters/robotGatewayClient.js";
 import { Mg400ArmController } from "../src/adapters/mg400ArmController.js";
+import { Rto6EquipmentController } from "../src/adapters/rto6EquipmentController.js";
 import { evaluateMg400PoseReachability } from "../src/domain/mg400Reachability.js";
+import {
+  VLM_COMPLETION_READY_POSE,
+  createVlmCompletionReadyStep,
+  postReadyTargetExecutionEnabled
+} from "../src/agent/vlmCompletionReadyMove.js";
 
 test("bench agent runs the mocked VLM-to-report flow with image and PDF model inputs", async () => {
   const simulationRequests = [];
@@ -63,6 +69,7 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
       Instruction: "Measure 5V rail ripple",
       Case_ID: "case-001",
       Operator: "demo-user",
+      Target_board_side: "front",
       Camera_image: {
         name: "PCBA_IMG.jpg",
         type: "image/jpeg",
@@ -90,6 +97,7 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.equal(run.input.instruction, "Measure 5V rail ripple");
     assert.equal(run.input.caseId, "case-001");
     assert.equal(run.input.operator, "demo-user");
+    assert.equal(run.input.targetBoardSide, "front");
     assert.equal(run.input.cameraImage.name, "PCBA_IMG.jpg");
     assert.equal(run.input.cameraImageBack.name, "PCBA_BACK.jpg");
     assert.equal(run.state, AgentState.REPORTING);
@@ -101,6 +109,10 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.match(run.vlmAgentCase.taskYaml, /user_measurement_question:/);
     assert.match(run.vlmAgentCase.taskYaml, /front_board_photo: "PCBA_IMG.jpg"/);
     assert.match(run.vlmAgentCase.taskYaml, /back_board_photo: "PCBA_BACK.jpg"/);
+    assert.match(run.vlmAgentCase.taskYaml, /target_board_side: "front"/);
+    assert.doesNotMatch(run.vlmAgentCase.taskYaml, /global temporary override/);
+    assert.match(run.vlmAgentCase.taskYaml, /PCB outline plus mounting\/tooling-hole registration/);
+    assert.match(run.vlmAgentCase.taskYaml, /IC detection\/IC-anchor code is retained/);
     assert.match(run.vlmAgentCase.taskYaml, /assembly_drawing_pdf: "bit-map.pdf"/);
     assert.match(run.vlmAgentCase.taskYaml, /assembly_drawing: "bit-map.png"/);
     assert.match(run.vlmAgentCase.taskYaml, /schematic_pdf: "schematic.pdf"/);
@@ -117,26 +129,174 @@ test("bench agent runs the mocked VLM-to-report flow with image and PDF model in
     assert.deepEqual(run.plan.steps[0].targetPose, run.modelOutput.mg400Pose);
     assert.equal(run.plan.steps[0].reachabilityPrecheck.reachable, false);
     assert.equal(run.execution.arm[0].controller, "simulation");
-    assert.equal(run.execution.arm[0].status, "BLOCKED");
-    assert.equal(run.execution.arm[0].tcpCommand, null);
-    assert.deepEqual(run.execution.arm[0].fallbackPose, {
-      x: 245.6,
-      y: -32.4,
-      z: 78.2,
-      r: 91.5
-    });
-    assert.deepEqual(simulationRequests, ["GetPose()"]);
+    assert.equal(run.execution.arm[0].status, "COMPLETED");
+    assert.deepEqual(run.execution.arm[0].executedPose, VLM_COMPLETION_READY_POSE);
+    assert.equal(run.execution.arm.length, 1);
+    assert.deepEqual(simulationRequests, [
+      "EnableRobot()",
+      "SpeedFactor(30)",
+      "MovJ(pose={368.487381,-26.022938,-130.549423,0,0,197.521088})"
+    ]);
     assert.equal(run.ragEvidence.length, 0);
     assert.equal(run.vlmObservation.modelInputSummary.attachmentCount, 4);
     assert.equal(run.vlmObservation.modelInputSummary.bitImageCount, 2);
     assert.equal(run.vlmObservation.modelInputSummary.schematicCount, 2);
     assert.equal(run.execution.equipment.length, 1);
-    assert.equal(run.execution.equipment[0].status, "SKIPPED");
-    assert.equal(run.report.measurements[0].pass, false);
-    assert.match(run.report.findings.join("\n"), /reachability guard blocked/);
+    assert.equal(run.execution.equipment[0].signal, "Current display: AMPL");
+    assert.equal(run.execution.equipment[0].value, 3.3);
+    assert.equal(run.report.measurements.length, 1);
+    assert.match(run.timeline.at(-1).message, /current RTO6 display/);
   } finally {
     await new Promise((resolve) => simulationServer.close(resolve));
   }
+});
+
+test("VLM completion ready move preserves the operator-recorded pose exactly", () => {
+  const step = createVlmCompletionReadyStep();
+
+  assert.equal(step.command, "MOVE_TO_VLM_COMPLETION_READY_POSE");
+  assert.deepEqual(step.targetPose, {
+    x: 368.487381,
+    y: -26.022938,
+    z: -130.549423,
+    r: 197.521088
+  });
+  assert.equal(step.reachabilityPrecheck.reachable, true);
+  assert.equal(step.reachabilityPrecheck.adjusted, false);
+  assert.deepEqual(step.reachabilityPrecheck.pose, step.targetPose);
+});
+
+test("post-ready target execution stays paused unless explicitly enabled", () => {
+  assert.equal(postReadyTargetExecutionEnabled({}), false);
+  assert.equal(postReadyTargetExecutionEnabled({
+    ENABLE_POST_READY_TARGET_EXECUTION: "false"
+  }), false);
+  assert.equal(postReadyTargetExecutionEnabled({
+    ENABLE_POST_READY_TARGET_EXECUTION: "true"
+  }), true);
+});
+
+test("RTO6 controller records the MEAN display without model-generated data", async () => {
+  const testDir = path.join(tmpdir(), `rto6-controller-${Date.now()}`);
+  const configPath = path.join(testDir, "rto6.json");
+  await mkdir(testDir, { recursive: true });
+  await writeFile(configPath, JSON.stringify({
+    host: "192.168.2.3",
+    port: 5025,
+    measurementSlot: 1,
+    captureMode: "set_mean_then_capture",
+    desiredMeasurement: "MEAN",
+    outputDir: testDir
+  }));
+  let workbookInput = null;
+  const controller = new Rto6EquipmentController({
+    configPath,
+    async bridgeRunner({ config, screenshotPath }) {
+      assert.equal(config.measurementSlot, 1);
+      assert.equal(config.captureMode, "set_mean_then_capture");
+      assert.equal(config.desiredMeasurement, "MEAN");
+      return {
+        instrument: "Rohde&Schwarz,RTO6,TEST,5.30.1.0",
+        host: config.host,
+        port: config.port,
+        measurementSlot: 1,
+        measurement: "MEAN",
+        source: "C1W1",
+        value: 3.287654,
+        unit: "V",
+        screenshotPath,
+        capturedAt: "2026-07-27T18:00:00+0800",
+        durationMs: 1200
+      };
+    },
+    async excelRunner(input) {
+      workbookInput = input;
+      return {
+        outputPath: input.outputPath,
+        previewPath: input.outputPath.replace(/\.xlsx$/i, ".preview.png")
+      };
+    }
+  });
+
+  const result = await controller.captureCurrentDisplayReport({
+    runId: "run-test",
+    caseId: "case-test",
+    targetPoints: ["TP9"],
+    robotPose: VLM_COMPLETION_READY_POSE
+  });
+
+  assert.equal(result.value, 3.287654);
+  assert.equal(result.unit, "V");
+  assert.equal(result.measurement, "MEAN");
+  assert.equal(result.source, "C1W1");
+  assert.equal(result.pass, null);
+  assert.equal(workbookInput.value, 3.287654);
+  assert.equal(workbookInput.measurement, "MEAN");
+  assert.deepEqual(workbookInput.robotPose, VLM_COMPLETION_READY_POSE);
+  assert.match(result.workbookPath, /\.xlsx$/);
+});
+
+test("bench agent stops later hardware actions when the VLM completion ready move fails", async () => {
+  const executedSteps = [];
+  const agent = new BenchAgent({
+    vlmClient: {
+      async analyzeBench() {
+        return {
+          recommendedMeasurements: [{
+            locationId: "TP9",
+            instrument: "oscilloscope",
+            signal: "3V3"
+          }]
+        };
+      }
+    },
+    largeModelClient: {
+      async generateMg400Pose() {
+        return { mg400Pose: { x: 300, y: 0, z: 0, r: 0 } };
+      }
+    },
+    ragRepository: null,
+    armController: {
+      async execute(step) {
+        executedSteps.push(step);
+        return {
+          stepId: step.id,
+          status: "BLOCKED",
+          message: "ready position unavailable"
+        };
+      }
+    },
+    equipmentController: {
+      async measure() {
+        throw new Error("measurement must not run");
+      }
+    },
+    reportGenerator: {
+      create({ measurements }) {
+        return { measurements };
+      }
+    }
+  });
+
+  const run = await agent.run({ command: "measure TP9" });
+
+  assert.equal(executedSteps.length, 1);
+  assert.equal(executedSteps[0].id, "step-vlm-complete-ready-position");
+  assert.equal(run.execution.arm.length, 1);
+  assert.equal(run.execution.equipment.length, 0);
+  assert.equal(run.state, AgentState.REPORTING);
+  assert.match(run.timeline.at(-1).message, /later hardware steps were stopped/);
+});
+
+test("board-side input preserves front, back, and auto routing", () => {
+  const base = { Instruction: "measure TP9" };
+
+  assert.equal(parseUserCommand({ ...base, Target_board_side: "front" }).targetBoardSide, "front");
+  assert.equal(parseUserCommand({ ...base, target_board_side: "back" }).targetBoardSide, "back");
+  assert.equal(parseUserCommand({ ...base, targetBoardSide: "auto" }).targetBoardSide, "auto");
+  assert.equal(parseUserCommand({ ...base, Target_board_side: "top" }).targetBoardSide, "front");
+  assert.equal(parseUserCommand({ ...base, Target_board_side: "bottom" }).targetBoardSide, "back");
+  assert.equal(parseUserCommand({ ...base, Target_board_side: "invalid" }).targetBoardSide, "auto");
 });
 
 test("MG400 reachability guard adjusts workspace envelope violations", () => {

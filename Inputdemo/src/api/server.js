@@ -13,11 +13,16 @@ import { readMg400Config, writeMg400Config } from "../adapters/mg400Config.js";
 import { VlmAgentCaseAdapter } from "../adapters/vlmAgentCaseAdapter.js";
 import { VlmAgentServiceRunner } from "../adapters/vlmAgentServiceRunner.js";
 import { RemoteVlmAgentServiceRunner } from "../adapters/remoteVlmAgentServiceRunner.js";
-import { MockEquipmentController } from "../adapters/mockEquipmentController.js";
+import { Rto6EquipmentController } from "../adapters/rto6EquipmentController.js";
 import { ReportGenerator } from "../adapters/reportGenerator.js";
 import { getEthernetInfo, autoDetectAdapter } from "../adapters/ethernetConfig.js";
 import { defaultVlmAgentRunsDir } from "../adapters/defaultPaths.js";
 import { VlmStatusMonitor } from "./vlmStatus.js";
+import {
+  executeVlmCompletionReadyMove,
+  postReadyTargetExecutionEnabled,
+  vlmCompletionReadyMoveSucceeded
+} from "../agent/vlmCompletionReadyMove.js";
 
 const port = Number(process.env.PORT || 3000);
 
@@ -35,7 +40,7 @@ if (runnerMode === "remote-svc" || shouldUseRemoteVlmService(process.env.VLM_AGE
 const serviceCaseAdapter = new VlmAgentCaseAdapter();
 const robotGateway = new RobotGatewayClient();
 const serviceArmController = robotGateway;
-const serviceEquipmentController = new MockEquipmentController();
+const serviceEquipmentController = new Rto6EquipmentController();
 const serviceReportGenerator = new ReportGenerator();
 const vlmStatus = new VlmStatusMonitor({
   workerCount: Number(process.env.VLM_MONITOR_WORKERS || 2)
@@ -329,6 +334,110 @@ async function finalizeSplitServiceRun(parentRunId) {
   transition(run, AgentState.EXECUTING,
     `Split VLM completed: ${allPoints.length}/${children.length} child runs succeeded; executing MG400 flow.`
   );
+
+  // All VLM child runs are complete at this point. Move to the operator-recorded
+  // ready pose exactly once before any per-target MG400 action.
+  const readyMove = await executeVlmCompletionReadyMove(serviceArmController);
+  run.execution.arm.push(readyMove.result);
+  vlmStatus.markMg400(
+    vlmCompletionReadyMoveSucceeded(readyMove.result) ? "executing" : "blocked",
+    {
+      runId: parentRunId,
+      stepId: readyMove.step.id,
+      action: "VLM 已完成，MG400 移动到固定起始位置",
+      result: readyMove.result
+    }
+  );
+  appendRunEvent(parentRunId, "robot.vlm_completion_ready_move_finished", {
+    step: readyMove.step,
+    result: readyMove.result
+  });
+  if (!vlmCompletionReadyMoveSucceeded(readyMove.result)) {
+    run.error = readyMove.result.message
+      || readyMove.result.error
+      || "MG400 failed to reach the required VLM-completion ready position.";
+    transition(
+      run,
+      AgentState.REPORTING,
+      "VLM completed, but the required ready-position move failed; later hardware steps were stopped."
+    );
+    run.report = serviceReportGenerator.create({
+      run,
+      ragEvidence: run.ragEvidence || [],
+      vlmObservation: run.vlmObservation,
+      measurements: run.execution.equipment
+    });
+    appendRunEvent(parentRunId, "node.failed", {
+      error: run.error,
+      step: readyMove.step,
+      result: readyMove.result
+    });
+    vlmStatus.markRunFailed(parentRunId, new Error(run.error));
+    updateRun(parentRunId, run);
+    return;
+  }
+
+  if (!postReadyTargetExecutionEnabled()) {
+    const reportPoint = allPoints[0];
+    const reportFinalAnswer = {
+      ...reportPoint.final_answer,
+      tp_id: reportPoint.id
+    };
+    run.vlmObservation = buildVlmObservation({
+      input: run.input,
+      service: completed,
+      finalAnswer: reportFinalAnswer,
+      pixel: reportPoint.pixel,
+      points: allPoints
+    });
+    run.modelOutput = buildModelOutput({
+      service: completed,
+      finalAnswer: reportFinalAnswer,
+      pixel: reportPoint.pixel,
+      pointId: reportPoint.id
+    });
+    const measurement = await serviceEquipmentController.captureCurrentDisplayReport({
+      runId: parentRunId,
+      caseId: run.input.caseId,
+      targetPoints: allPoints.map((point) => point.id),
+      robotPose: readyMove.result.executedPose || readyMove.step.targetPose
+    });
+    run.execution.equipment.push(measurement);
+    appendRunEvent(parentRunId, "equipment.rto6_capture_finished", {
+      targetPoints: allPoints.map((point) => point.id),
+      result: measurement
+    });
+
+    vlmStatus.markMg400("idle", {
+      runId: parentRunId,
+      stepId: readyMove.step.id,
+      action: "MG400 已到达固定点并保持静止",
+      result: readyMove.result
+    });
+    transition(
+      run,
+      AgentState.REPORTING,
+      "VLM completed; MG400 is holding at the fixed measurement position, and the current RTO6 display was saved to Excel."
+    );
+    run.report = serviceReportGenerator.create({
+      run,
+      ragEvidence: run.ragEvidence || [],
+      vlmObservation: run.vlmObservation,
+      measurements: run.execution.equipment
+    });
+    appendRunEvent(parentRunId, "node.completed", {
+      points: allPoints,
+      childCount: children.length,
+      postReadyExecutionPaused: true
+    });
+    vlmStatus.handleEvent(parentRunId, "node.completed", {
+      runId: parentRunId,
+      points: allPoints,
+      postReadyExecutionPaused: true
+    });
+    updateRun(parentRunId, run);
+    return;
+  }
 
   // Execute robot arm for each successful point
   const blockedLocations = new Map();

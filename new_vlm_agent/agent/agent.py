@@ -409,7 +409,9 @@ class Agent:
                             "duration_s": round(tool_dt, 4),
                         })
                         continue
-                    exec_arguments: Any = call.arguments
+                    exec_arguments: Any = self._route_outline_tool_arguments(
+                        call.name, call.arguments
+                    )
                     if call.name == "finish" and isinstance(call.arguments, dict):
                         exec_arguments = normalize_finish_arguments(call.arguments)
                     self._emit("tool.started", {
@@ -957,6 +959,14 @@ class Agent:
         self._compact_message_window(messages)
 
     def _build_workflow_plan(self, inputs: dict[str, Any]) -> list[WorkflowPlanStep]:
+        requested_side = str(inputs.get("target_board_side", "")).strip().lower()
+        if requested_side in {"front", "top"}:
+            return self._workflow_plan_for_resolved_side("front")
+        if requested_side in {"back", "bottom", "bot"}:
+            return self._workflow_plan_for_resolved_side("back")
+        if requested_side == "auto":
+            return self._auto_side_workflow_plan()
+
         # Prefer explicit machine-readable plan when provided.
         candidate_paths: list[Path] = []
         in_task = inputs.get("workflow_plan_file")
@@ -970,18 +980,21 @@ class Agent:
                         return loaded
             except Exception:
                 continue
-        if self._is_step3_premarked_case(inputs):
-            return self._step3_premarked_workflow_plan()
-        requested_side = str(inputs.get("target_board_side", "")).strip().lower()
-        if requested_side == "front":
+        has_front = (
+            isinstance(inputs.get("front_board_photo"), str)
+            and bool(str(inputs.get("front_board_photo")).strip())
+        )
+        has_back = (
+            isinstance(inputs.get("back_board_photo"), str)
+            and bool(str(inputs.get("back_board_photo")).strip())
+        )
+        if has_front and not has_back:
             return self._workflow_plan_for_resolved_side("front")
-        if requested_side == "back":
+        if has_back and not has_front:
             return self._workflow_plan_for_resolved_side("back")
-        if requested_side == "auto":
+        if has_front and has_back:
             return self._auto_side_workflow_plan()
-        if isinstance(inputs.get("back_board_photo"), str) and str(inputs.get("back_board_photo")).strip():
-            return self._auto_side_workflow_plan()
-        return self._default_workflow_plan()
+        return self._auto_side_workflow_plan()
 
     @staticmethod
     def _load_workflow_plan_file(plan_path: Path) -> list[WorkflowPlanStep]:
@@ -1179,8 +1192,13 @@ class Agent:
         ]
 
     @staticmethod
-    def _back_board_workflow_plan() -> list[WorkflowPlanStep]:
-        """Back side: TP locator page -> outline/hole geometry, no largest-IC anchor."""
+    def _outline_hole_workflow_plan(side: str) -> list[WorkflowPlanStep]:
+        """Use the same IC-free outline/hole registration on the selected board side."""
+        normalized = str(side or "").strip().lower()
+        if normalized not in {"front", "back"}:
+            raise ValueError(f"Unsupported outline/hole board side: {side!r}")
+        photo_key = f"{normalized}_board_photo"
+        locator_label = "front/Top" if normalized == "front" else "back/Bottom"
         return [
             WorkflowPlanStep(
                 step_id="part0_signal_to_tp",
@@ -1191,8 +1209,11 @@ class Agent:
             ),
             WorkflowPlanStep(
                 step_id="part0_pdf_search_and_mark",
-                title="Part0-B/C mark TP on the back locator page",
-                objective="Produce the green-marked assembly page for the requested back-side TP.",
+                title=f"Part0-B/C mark TP on the {locator_label} locator page",
+                objective=(
+                    f"Search only the {locator_label} assembly page and produce the green-marked "
+                    f"locator image for the requested {normalized}-side TP."
+                ),
                 done_any_artifacts=[
                     "debug/case10_target_tp_pdf_search.json",
                     "debug/case10_assembly_drawing.png",
@@ -1202,9 +1223,10 @@ class Agent:
             ),
             WorkflowPlanStep(
                 step_id="partback_vlm_landmarks",
-                title="Optional PCB-edge opening review",
+                title=f"Optional {normalized}-side PCB-edge opening review",
                 objective=(
-                    "Inspect only PCB-edge mounting/tooling holes or cutouts. Record zero matches "
+                    f"Compare the marked locator with INPUT_PATHS.{photo_key}. Inspect only PCB-edge "
+                    "mounting/tooling holes or cutouts. Record zero matches "
                     "when ambiguous, or at least two high-confidence pairs. Rectangle mapping "
                     "remains the safe base path."
                 ),
@@ -1219,32 +1241,54 @@ class Agent:
                     "record_back_landmark_review",
                 ],
                 next_action_hint=(
-                    "Prepare and inspect edge-opening candidates. Record reliable pairs, or "
+                    "Call prepare_back_board_landmark_candidates with "
+                    f"back_board_path=INPUT_PATHS.{photo_key}. Record reliable pairs, or "
                     "matches=[] so registration keeps the rectangle mapping."
                 ),
             ),
             WorkflowPlanStep(
                 step_id="partback_board_registration",
-                title="Back board outline and hole registration",
-                objective="Do not detect a largest IC. Register the green-marked locator to INPUT_PATHS.back_board_photo using PCB outline and circular mounting/tooling holes.",
+                title=f"{normalized.capitalize()} board outline and hole registration",
+                objective=(
+                    "Do not detect or use any IC anchor. Register the green-marked locator to "
+                    f"INPUT_PATHS.{photo_key} using the PCB outline and circular "
+                    "mounting/tooling holes."
+                ),
                 done_any_artifacts=["debug/back_board_registration.json", "debug/back_board_registration_overlay.png"],
-                allowed_tools=["view_image", "register_back_board_from_outline_and_holes"],
-                next_action_hint="Call register_back_board_from_outline_and_holes with the marked locator and INPUT_PATHS.back_board_photo.",
+                allowed_tools=["view_image", "register_back_board_from_outline_and_holes", "finish"],
+                next_action_hint=(
+                    "Call register_back_board_from_outline_and_holes with "
+                    f"back_board_path=INPUT_PATHS.{photo_key}. If automatic CV fails, view both images "
+                    "and retry exactly once with rough normalized PCB ROIs. If that also fails, finish with "
+                    "needs_user_help=true instead of retrying."
+                ),
             ),
             WorkflowPlanStep(
                 step_id="partback_finish",
-                title="Back board final marker",
-                objective="Create standard Step08 artifacts from the back-board registration and finish.",
+                title=f"{normalized.capitalize()} board final marker",
+                objective=(
+                    "Create standard Step08 artifacts from the outline/hole registration on "
+                    f"INPUT_PATHS.{photo_key}; camera_view must be {normalized}."
+                ),
                 done_any_artifacts=["debug/step03_mapping.json", "debug/step08_final_tp.png", "debug/step08_result.json"],
                 allowed_tools=["emit_step08_from_back_board_registration", "finish"],
-                next_action_hint="Call emit_step08_from_back_board_registration, then finish using debug/step08_result.json.",
+                next_action_hint=(
+                    "Call emit_step08_from_back_board_registration with "
+                    f"back_board_path=INPUT_PATHS.{photo_key} and camera_view={normalized}, "
+                    "then finish using debug/step08_result.json."
+                ),
             ),
         ]
 
     @staticmethod
+    def _back_board_workflow_plan() -> list[WorkflowPlanStep]:
+        """Compatibility wrapper for the original back-side workflow."""
+        return Agent._outline_hole_workflow_plan("back")
+
+    @staticmethod
     def _auto_side_workflow_plan() -> list[WorkflowPlanStep]:
-        """Infer side from the marked locator, then execute the matching geometry path."""
-        plan = Agent._default_workflow_plan()
+        """Infer the physical side, then route to the same outline/hole algorithm."""
+        plan = Agent._outline_hole_workflow_plan("front")[:2]
         side_step = WorkflowPlanStep(
             step_id="partside_locator_decision",
             title="Infer physical board side from locator",
@@ -1259,62 +1303,15 @@ class Agent:
                 "silkscreen and component-layout evidence, then call record_board_side_decision."
             ),
         )
-        plan.insert(2, side_step)
-        plan.insert(3, WorkflowPlanStep(
-            step_id="partback_vlm_landmarks",
-            title="VLM semantic review of PCB-edge openings",
-            objective=(
-                "For side=back, after the PCB rectangles are known, generate candidates only in the PCB edge band. "
-                "Match true mounting/tooling holes or board cutouts. Record zero pairs when ambiguous, or at least "
-                "two pairs with confidence >=0.75. Pads/vias are forbidden and rectangle fallback is mandatory."
-            ),
-            done_any_artifacts=[
-                "debug/back_02_edge_hole_candidates.json",
-                "debug/back_02_vlm_edge_hole_candidate_sheet.png",
-                "debug/back_03_vlm_edge_hole_review.json",
-            ],
-            allowed_tools=[
-                "prepare_back_board_landmark_candidates",
-                "view_image",
-                "record_back_landmark_review",
-            ],
-            next_action_hint=(
-                "If side=back, prepare and inspect the combined edge-hole candidate sheet. Record reliable semantic "
-                "pairs, or matches=[] with evidence when uncertain so rectangle mapping remains unchanged."
-            ),
-        ))
-        plan[-1] = WorkflowPlanStep(
-            step_id="partd_case12_align_and_finish",
-            title="Side-aware mapping and finish",
-            objective=(
-                "Read board_side_decision.json. For front, run the existing IC-anchor alignment. "
-                "For back, skip IC anchors and use outline/hole registration on back_board_photo."
-            ),
-            done_any_artifacts=["debug/step03_mapping.json", "debug/step08_final_tp.png", "debug/step08_result.json"],
-            allowed_tools=[
-                "case12_build_and_align_from_step02_anchors",
-                "emit_step08_from_case12_aligned",
-                "register_back_board_from_outline_and_holes",
-                "emit_step08_from_back_board_registration",
-                "finish",
-                "view_image",
-            ],
-            next_action_hint=(
-                "If side=back, call register_back_board_from_outline_and_holes then "
-                "emit_step08_from_back_board_registration. The review JSON is advisory and strict-gated. "
-                "If side=front, use the existing case12 IC path."
-            ),
-        )
+        plan.append(side_step)
         return plan
 
     @staticmethod
     def _workflow_plan_for_resolved_side(side: str) -> list[WorkflowPlanStep]:
         """Return a physically isolated plan after the one-time auto decision."""
         normalized = str(side or "").strip().lower()
-        if normalized == "front":
-            return Agent._default_workflow_plan()
-        if normalized == "back":
-            return Agent._back_board_workflow_plan()
+        if normalized in {"front", "back"}:
+            return Agent._outline_hole_workflow_plan(normalized)
         raise ValueError(f"Unsupported resolved board side: {side!r}")
 
     def _artifact_exists(self, rel: str) -> bool:
@@ -1376,15 +1373,40 @@ class Agent:
                 continue
         return None
 
+    def _resolved_board_side(self) -> str | None:
+        """Return the auto decision, or the explicit task-side lock."""
+        decided = self._board_side_decision()
+        if decided in {"front", "back"}:
+            return decided
+        requested = str(self._run_inputs.get("target_board_side") or "").strip().lower()
+        aliases = {"top": "front", "bottom": "back", "bot": "back"}
+        requested = aliases.get(requested, requested)
+        return requested if requested in {"front", "back"} else None
+
+    def _route_outline_tool_arguments(self, tool: str, arguments: Any) -> Any:
+        """Force outline/hole tools onto the physical photo selected by the task."""
+        if tool not in {
+            "prepare_back_board_landmark_candidates",
+            "register_back_board_from_outline_and_holes",
+            "emit_step08_from_back_board_registration",
+        }:
+            return arguments
+        side = self._resolved_board_side()
+        if side not in {"front", "back"}:
+            return arguments
+        routed = dict(arguments) if isinstance(arguments, dict) else {}
+        routed["back_board_path"] = f"INPUT_PATHS.{side}_board_photo"
+        if tool == "emit_step08_from_back_board_registration":
+            routed["camera_view"] = side
+        return routed
+
     def _is_plan_step_done(self, step: WorkflowPlanStep) -> bool:
         # Once the locator has proven the TP is on the back, the two largest-IC
         # phases are intentionally bypassed. The back has no stable IC anchor.
-        if self._board_side_decision() == "back" and step.step_id in {
+        if self._resolved_board_side() == "back" and step.step_id in {
             "partb_locator_largest_ic",
             "parta_board_largest_ic",
         }:
-            return True
-        if self._board_side_decision() == "front" and step.step_id == "partback_vlm_landmarks":
             return True
         return bool(step.done_any_artifacts) and all(
             self._artifact_exists(p) for p in step.done_any_artifacts
@@ -1565,7 +1587,7 @@ class Agent:
 
     def _validate_resolved_side_artifacts(self) -> list[str]:
         """Reject artifacts produced by the opposite physical-side workflow."""
-        side = self._board_side_decision()
+        side = self._resolved_board_side()
         if side not in {"front", "back"}:
             return []
         errors: list[str] = []
@@ -1597,12 +1619,11 @@ class Agent:
             errors.append(
                 f"step08 camera_view={camera_view!r} conflicts with locked side={side!r}."
             )
-        is_back_mapping = mapping_method == "back_board_outline_holes"
-        if side == "front" and is_back_mapping:
-            errors.append("Front side cannot use back_board_outline_holes mapping.")
-        if side == "back" and mapping_method and not is_back_mapping:
+        expected_mapping = f"{side}_board_outline_holes"
+        if mapping_method and mapping_method != expected_mapping:
             errors.append(
-                f"Back side cannot use front mapping_method={mapping_method!r}."
+                f"{side.capitalize()} side requires mapping_method={expected_mapping!r}; "
+                f"got {mapping_method!r}."
             )
         return errors
 
@@ -1619,7 +1640,7 @@ class Agent:
             "forced_submit": True,
             "max_steps": self.cfg.max_steps,
         }
-        locked_side = self._board_side_decision()
+        locked_side = self._resolved_board_side()
         if locked_side in {"front", "back"}:
             answer["camera_view"] = locked_side
         if pixel is not None and not side_errors:
@@ -1719,18 +1740,7 @@ class Agent:
 
         current = plan_steps[plan_idx]
         allowed = list(current.allowed_tools or [])
-        side = self._board_side_decision()
-        if current.step_id == "partd_case12_align_and_finish" and side == "back":
-            allowed = [name for name in allowed if name in {
-                "register_back_board_from_outline_and_holes",
-                "emit_step08_from_back_board_registration",
-                "finish", "view_image", "read_text_file",
-            }]
-        elif current.step_id == "partd_case12_align_and_finish" and side == "front":
-            allowed = [name for name in allowed if name not in {
-                "register_back_board_from_outline_and_holes",
-                "emit_step08_from_back_board_registration",
-            }]
+        side = self._resolved_board_side()
         if not allowed:
             return self.registry.openai_schema()
 
@@ -1748,30 +1758,19 @@ class Agent:
         plan_idx: int,
     ) -> str | None:
         tool = call.name
-        side = self._board_side_decision()
-        front_only_tools = {
+        side = self._resolved_board_side()
+        ic_anchor_tools = {
             "case12_build_and_align_from_step02_anchors",
             "emit_step08_from_case12_aligned",
             "detect_largest_ic_on_assembly_from_vlm_hint",
             "detect_largest_ic_on_board_full",
             "detect_largest_ic_on_board_from_vlm_hint",
         }
-        back_only_tools = {
-            "prepare_back_board_landmark_candidates",
-            "record_back_landmark_review",
-            "register_back_board_from_outline_and_holes",
-            "emit_step08_from_back_board_registration",
-        }
-        if side == "back" and tool in front_only_tools:
+        if tool in ic_anchor_tools:
             return (
-                "[side-guard] side=back: front/case12 IC-anchor tools are forbidden. "
-                "Use register_back_board_from_outline_and_holes, then "
-                "emit_step08_from_back_board_registration."
-            )
-        if side == "front" and tool in back_only_tools:
-            return (
-                "[side-guard] side=front: back-board outline/hole tools are forbidden. "
-                "Use the largest-IC anchor path only."
+                f"[side-guard] side={side or 'unresolved'}: IC-anchor tools are retained in code but disabled. "
+                "Use the PCB outline and mounting/tooling-hole registration on the "
+                "physical photo selected by target_board_side."
             )
 
         # The physical-side lock is a run-wide safety invariant.  Keep it
@@ -2526,9 +2525,14 @@ class Agent:
                     "[plan-guard] PartD finalization should use dedicated tool "
                     "`emit_step08_from_case12_aligned` instead of manual annotate/save."
                 )
-        if tool == "finish" and current_id != "partd_case12_align_and_finish":
+        if tool == "finish" and current_id not in {
+            "partd_case12_align_and_finish",
+            "partback_board_registration",
+            "partback_finish",
+        }:
             return (
-                "[plan-guard] `finish` is only allowed in PartD after prior phases complete."
+                "[plan-guard] `finish` is only allowed in the final mapping phase "
+                "after prior phases complete."
             )
         return None
 
@@ -2647,10 +2651,48 @@ class Agent:
         ws = self.cfg.workspace_dir
         sig_p = ws / "debug" / "case10_signal_to_tp.json"
         tp_query = ""
+        locator_page: int | None = None
+        signal_side = ""
         if sig_p.is_file():
             try:
                 sig_obj = json.loads(sig_p.read_text(encoding="utf-8"))
                 tp_query = str(sig_obj.get("tp_id_or_ref") or "").strip()
+                for key in ("locator_page", "assembly_page"):
+                    value = sig_obj.get(key)
+                    if isinstance(value, int) and value >= 1:
+                        locator_page = value
+                        break
+                signal_side = str(sig_obj.get("board_side") or "").strip().lower()
+                target_points = sig_obj.get("target_points")
+                if isinstance(target_points, list):
+                    selected_point: dict[str, Any] | None = None
+                    for point in target_points:
+                        if not isinstance(point, dict):
+                            continue
+                        point_tp = str(
+                            point.get("tp_id")
+                            or point.get("tp_id_or_ref")
+                            or point.get("test_point")
+                            or ""
+                        ).strip()
+                        if not tp_query and point_tp:
+                            tp_query = point_tp
+                        if point_tp and tp_query and point_tp.upper() == tp_query.upper():
+                            selected_point = point
+                            break
+                        if selected_point is None:
+                            selected_point = point
+                    if selected_point is not None:
+                        if locator_page is None:
+                            for key in ("locator_page", "assembly_page"):
+                                value = selected_point.get(key)
+                                if isinstance(value, int) and value >= 1:
+                                    locator_page = value
+                                    break
+                        if not signal_side:
+                            signal_side = str(
+                                selected_point.get("board_side") or ""
+                            ).strip().lower()
             except Exception:  # noqa: BLE001
                 pass
         asm_pdf = (
@@ -2658,11 +2700,34 @@ class Agent:
             or self._run_inputs.get("locator_pdf")
             or self._run_inputs.get("assembly_drawing_pdf_path")
         )
-        return {
+        requested_side = str(
+            self._run_inputs.get("target_board_side") or signal_side or ""
+        ).strip().lower()
+        page_reason = ""
+        if requested_side in {"back", "bottom"}:
+            # TI-style two-page assembly drawings used by this workflow place
+            # TOP on page 1 and BOTTOM on page 2. Never silently fall back to
+            # the opposite face when the requested TP appears on both pages.
+            locator_page = 2
+            page_reason = (
+                "authoritative target_board_side=back requires BOTTOM assembly page"
+            )
+        elif requested_side in {"front", "top"}:
+            locator_page = 1
+            page_reason = (
+                "authoritative target_board_side=front requires TOP assembly page"
+            )
+        elif locator_page is not None:
+            page_reason = "explicit locator_page/assembly_page from case10_signal_to_tp.json"
+        args = {
             "pdf_path": str(asm_pdf or ""),
             "query": tp_query,
             "out_json_path": "debug/case10_target_tp_pdf_search.json",
         }
+        if locator_page is not None:
+            args["page_filter"] = [locator_page]
+            args["page_filter_reason"] = page_reason
+        return args
 
     def _should_auto_emit_step08_after_align(
         self,
@@ -2903,8 +2968,32 @@ class Agent:
             "## Task",
             question.strip(),
             "",
-            "## Provided inputs",
         ]
+        requested_side = str(inputs.get("target_board_side") or "auto").strip().lower()
+        requested_side = {
+            "top": "front",
+            "bottom": "back",
+            "bot": "back",
+        }.get(requested_side, requested_side)
+        text_context_lines.extend([
+            "## Board registration policy (MANDATORY)",
+            "- Use PCB outline plus mounting/tooling-hole registration for both front and back.",
+            "- Largest-IC and all IC-anchor tools remain installed but are forbidden in this workflow.",
+        ])
+        if requested_side in {"front", "back"}:
+            locator_page = "TOP/page 1" if requested_side == "front" else "BOTTOM/page 2"
+            text_context_lines.extend([
+                f"- Board side is locked to `{requested_side}`.",
+                f"- Search only the {locator_page} assembly locator page.",
+                f"- Register only onto `INPUT_PATHS.{requested_side}_board_photo`.",
+                f"- Final `camera_view` must be `{requested_side}`.",
+            ])
+        else:
+            text_context_lines.append(
+                "- Decide the physical side once from locator evidence, then lock the matching "
+                "front_board_photo or back_board_photo and use the same outline/hole algorithm."
+            )
+        text_context_lines.extend(["", "## Provided inputs"])
         image_parts: list[dict[str, Any]] = []
 
         inline_images_ok = self._supports_inline_images()
@@ -3095,7 +3184,7 @@ class Agent:
         if answer.get("needs_user_help") is True:
             return errors
 
-        locked_side = self._board_side_decision()
+        locked_side = self._resolved_board_side()
         answer_side = str(answer.get("camera_view", "")).strip().lower()
         if locked_side in {"front", "back"} and answer_side != locked_side:
             errors.append(
@@ -3679,7 +3768,10 @@ class Agent:
         if mapping_method_early == "case12_step02_vlm_ic_align":
             errors.extend(self._validate_skill_contract_case12_vlm_ic_align(ws))
             return errors
-        if mapping_method_early == "back_board_outline_holes":
+        if mapping_method_early in {
+            "front_board_outline_holes",
+            "back_board_outline_holes",
+        }:
             errors.extend(self._validate_skill_contract_back_board_registration(ws))
             return errors
 
